@@ -1,0 +1,13 @@
+{
+  "project_id": "418aea52-c548-4a24-aeeb-2dd71f871ce2",
+  "project_title": "BabelTower",
+  "resources": [
+    {
+      "id": "d2ce357e-d85e-41e3-9569-0ae870cb6e3e",
+      "resource_type": "github_repo",
+      "resource_ref": {
+        "url": "https://github.com/itMrBoy/BabelTower"
+      }
+    }
+  ]
+}

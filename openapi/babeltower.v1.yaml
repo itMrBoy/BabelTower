@@ -1,0 +1,966 @@
+openapi: 3.1.0
+info:
+  title: BabelTower API
+  version: 1.0.0
+  description: |
+    BabelTower i18n dictionary and translation task API.
+    All import and save workflows follow: Input (File) -> Parser -> Standard JSON -> Conflict Check -> Database.
+servers:
+  - url: /api
+    description: Next.js Route Handlers base path
+tags:
+  - name: Dictionary
+  - name: Projects
+  - name: Tasks
+  - name: Export
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, requestId]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                  requestId:
+                    type: string
+  /dictionaries:
+    get:
+      tags: [Dictionary]
+      operationId: searchDictionaries
+      summary: Search dictionary entries by Chinese or English text
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: field
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auto, chinese, english]
+            default: auto
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Dictionary search result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DictionarySearchResponse"
+    post:
+      tags: [Dictionary]
+      operationId: createDictionaryEntry
+      summary: Create a dictionary entry after conflict check
+      description: Blocking conflicts return 409 and must be resolved before writing Dictionary.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDictionaryRequest"
+      responses:
+        "201":
+          description: Dictionary entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DictionaryEntryResponse"
+        "409":
+          description: Conflict must be resolved before writing dictionary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictCheckResponse"
+  /dictionaries/conflicts:
+    post:
+      tags: [Dictionary]
+      operationId: checkDictionaryConflicts
+      summary: Check exact and similar Chinese conflicts before dictionary writes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConflictCheckRequest"
+      responses:
+        "200":
+          description: Conflict check result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictCheckResponse"
+  /projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: List product projects
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, requestId]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+                  requestId:
+                    type: string
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Create a product project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code:
+                  type: string
+                  example: web-console
+                name:
+                  type: string
+                  example: Web Console
+                description:
+                  type: string
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project, requestId]
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+                  requestId:
+                    type: string
+  /projects/{projectId}/current-task:
+    get:
+      tags: [Projects, Tasks]
+      operationId: getProjectCurrentTask
+      summary: Get latest editable task for a project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Current editable task or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task, requestId]
+                properties:
+                  task:
+                    oneOf:
+                      - $ref: "#/components/schemas/TranslationTask"
+                      - type: "null"
+                  requestId:
+                    type: string
+  /tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: List tasks by project and status
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+        - name: historyOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, requestId]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TranslationTask"
+                  requestId:
+                    type: string
+    post:
+      tags: [Tasks]
+      operationId: importTaskFiles
+      summary: Import file or files and create first snapshot
+      description: |
+        Canonical import pipeline:
+        Input (File) -> Parser -> Standard JSON -> Conflict Check -> Database.
+        It creates a TranslationTask and an IMPORTED TaskSnapshot.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [projectId, name, mode, format, sourceFile]
+              properties:
+                projectId:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+                  maxLength: 160
+                mode:
+                  $ref: "#/components/schemas/TaskMode"
+                format:
+                  $ref: "#/components/schemas/FileFormat"
+                sourceLocale:
+                  type: string
+                  default: zh-CN
+                targetLocale:
+                  type: string
+                  default: en-US
+                sourceFile:
+                  type: string
+                  format: binary
+                  description: Chinese source file
+                targetFile:
+                  type: string
+                  format: binary
+                  description: English target file, required when mode is DUAL_SOURCE
+      responses:
+        "201":
+          description: Task imported with preview rows and conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskImportResponse"
+        "400":
+          description: Invalid file pair, parser error, or key mismatch that prevents preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tasks/{taskId}:
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Get task with latest snapshot
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task, latestSnapshot, requestId]
+                properties:
+                  task:
+                    $ref: "#/components/schemas/TranslationTask"
+                  latestSnapshot:
+                    $ref: "#/components/schemas/TaskSnapshot"
+                  requestId:
+                    type: string
+  /tasks/{taskId}/rows:
+    patch:
+      tags: [Tasks]
+      operationId: updateTaskRows
+      summary: Update editable preview rows and create an autosaved snapshot
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseVersion, rows]
+              properties:
+                baseVersion:
+                  type: integer
+                  minimum: 1
+                rows:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/PreviewRowPatch"
+      responses:
+        "200":
+          description: Rows updated and snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSnapshotResponse"
+        "409":
+          description: Snapshot version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tasks/{taskId}/snapshot:
+    post:
+      tags: [Tasks]
+      operationId: createTaskSnapshot
+      summary: Manually create a draft snapshot
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseVersion, previewRows]
+              properties:
+                baseVersion:
+                  type: integer
+                  minimum: 1
+                previewRows:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PreviewRow"
+      responses:
+        "200":
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSnapshotResponse"
+  /tasks/{taskId}/validate:
+    post:
+      tags: [Tasks]
+      operationId: validateTask
+      summary: Validate task rows before save or export
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [snapshotVersion]
+              properties:
+                snapshotVersion:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResponse"
+  /tasks/{taskId}/save:
+    post:
+      tags: [Tasks]
+      operationId: saveTask
+      summary: Save task and optionally synchronize Dictionary
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveTaskRequest"
+      responses:
+        "200":
+          description: Task saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task, snapshot, dictionarySync, requestId]
+                properties:
+                  task:
+                    $ref: "#/components/schemas/TranslationTask"
+                  snapshot:
+                    $ref: "#/components/schemas/TaskSnapshot"
+                  dictionarySync:
+                    $ref: "#/components/schemas/DictionarySyncResult"
+                  requestId:
+                    type: string
+        "409":
+          description: Blocking conflicts are unresolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictCheckResponse"
+  /tasks/{taskId}/export:
+    post:
+      tags: [Export]
+      operationId: exportTask
+      summary: Export zh and en files from a saved or draft snapshot
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [snapshotVersion]
+              properties:
+                snapshotVersion:
+                  type: integer
+                  minimum: 1
+                fileBaseName:
+                  type: string
+                  example: messages
+      responses:
+        "200":
+          description: Zip archive containing zh and en files
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "422":
+          description: Validation failed and files cannot be exported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResponse"
+  /tasks/{taskId}/history:
+    get:
+      tags: [Tasks]
+      operationId: listTaskSnapshots
+      summary: List task snapshots for restore or read-only history
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, requestId]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaskSnapshot"
+                  requestId:
+                    type: string
+components:
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    FileFormat:
+      type: string
+      enum: [JSON, PROPERTIES]
+    TaskMode:
+      type: string
+      enum: [SINGLE_SOURCE, DUAL_SOURCE]
+    TaskStatus:
+      type: string
+      enum: [DRAFT, SAVED, READ_ONLY_HISTORY, CANCELLED]
+    SnapshotKind:
+      type: string
+      enum: [IMPORTED, AUTOSAVED, MANUAL_DRAFT, SAVED, EXPORTED]
+    ConflictType:
+      type: string
+      enum: [DUPLICATE_IDENTICAL, EXACT_CHINESE_DIFF_ENGLISH, SIMILAR_CHINESE]
+    ConflictSeverity:
+      type: string
+      enum: [INFO, WARNING, BLOCKING]
+    ConflictResolution:
+      type: string
+      enum: [UNRESOLVED, KEEP_EXISTING, UPDATE_DICTIONARY, IGNORE_SIMILAR, EDIT_ROW]
+    DictionaryEntry:
+      type: object
+      required: [id, chineseText, englishText, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chineseText:
+          type: string
+          example: 保存
+        englishText:
+          type: string
+          example: Save
+        tags:
+          type: array
+          items:
+            type: string
+        note:
+          type: string
+        usageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateDictionaryRequest:
+      type: object
+      required: [chineseText, englishText]
+      properties:
+        chineseText:
+          type: string
+          minLength: 1
+        englishText:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          items:
+            type: string
+        note:
+          type: string
+        resolution:
+          $ref: "#/components/schemas/ConflictResolution"
+    DictionaryEntryResponse:
+      type: object
+      required: [entry, requestId]
+      properties:
+        entry:
+          $ref: "#/components/schemas/DictionaryEntry"
+        requestId:
+          type: string
+    DictionarySearchResponse:
+      type: object
+      required: [items, requestId]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [entry, matchType]
+            properties:
+              entry:
+                $ref: "#/components/schemas/DictionaryEntry"
+              matchType:
+                type: string
+                enum: [EXACT, FUZZY, SIMILAR]
+              score:
+                type: number
+                minimum: 0
+                maximum: 1
+        requestId:
+          type: string
+    ConflictCheckRequest:
+      type: object
+      required: [candidates]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        snapshotVersion:
+          type: integer
+        candidates:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [chineseText]
+            properties:
+              key:
+                type: string
+              chineseText:
+                type: string
+                minLength: 1
+              englishText:
+                type: string
+    ConflictCheckResponse:
+      type: object
+      required: [summary, conflicts, canWriteDictionary, requestId]
+      properties:
+        summary:
+          type: object
+          required: [total, blocking, warning, info]
+          properties:
+            total:
+              type: integer
+            blocking:
+              type: integer
+            warning:
+              type: integer
+            info:
+              type: integer
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DictionaryConflict"
+        canWriteDictionary:
+          type: boolean
+        requestId:
+          type: string
+    DictionaryConflict:
+      type: object
+      required: [type, severity, candidateChineseText, reason, resolution]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/ConflictType"
+        severity:
+          $ref: "#/components/schemas/ConflictSeverity"
+        resolution:
+          $ref: "#/components/schemas/ConflictResolution"
+        candidateKey:
+          type: string
+        candidateChineseText:
+          type: string
+        candidateEnglishText:
+          type: string
+        existingDictionaryId:
+          type: string
+          format: uuid
+        existingChineseText:
+          type: string
+        existingEnglishText:
+          type: string
+        similarity:
+          type: number
+          minimum: 0
+          maximum: 1
+        reason:
+          type: string
+          example: 中文内容完全一致，但英文不同
+    Project:
+      type: object
+      required: [id, code, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        currentTaskId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TranslationTask:
+      type: object
+      required: [id, projectId, name, mode, format, status, isEditable, latestVersion, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mode:
+          $ref: "#/components/schemas/TaskMode"
+        format:
+          $ref: "#/components/schemas/FileFormat"
+        sourceLocale:
+          type: string
+          default: zh-CN
+        targetLocale:
+          type: string
+          default: en-US
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        isEditable:
+          type: boolean
+        latestVersion:
+          type: integer
+        sourceFilename:
+          type: string
+        targetFilename:
+          type: string
+        savedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StandardI18nDocument:
+      type: object
+      required: [schemaVersion, format, role, keySeparator, entries, meta]
+      properties:
+        schemaVersion:
+          type: string
+          const: "1.0"
+        format:
+          type: string
+          enum: [json, properties]
+        locale:
+          type: string
+        role:
+          type: string
+          enum: [source, target, dictionary]
+        keySeparator:
+          type: string
+          const: "."
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/StandardI18nEntry"
+        meta:
+          type: object
+          additionalProperties: true
+    StandardI18nEntry:
+      type: object
+      required: [key, keyPath, value, valueType, order, source]
+      properties:
+        key:
+          type: string
+        keyPath:
+          type: array
+          items:
+            type: string
+        value:
+          type: string
+        valueType:
+          type: string
+          const: string
+        order:
+          type: integer
+        source:
+          type: object
+          additionalProperties: true
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [UNSUPPORTED_VALUE, DUPLICATED_KEY, MISSING_IN_SOURCE, MISSING_IN_TARGET]
+    PreviewRow:
+      type: object
+      required: [rowId, key, keyPath, zhText, status, conflicts, updatedAt]
+      properties:
+        rowId:
+          type: string
+        key:
+          type: string
+        keyPath:
+          type: array
+          items:
+            type: string
+        zhText:
+          type: string
+        enText:
+          type: string
+        dictionaryText:
+          type: string
+        finalEnText:
+          type: string
+        status:
+          type: string
+          enum: [READY, MISSING_REQUIRED, CONFLICT, UNSUPPORTED]
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DictionaryConflict"
+        updatedAt:
+          type: string
+          format: date-time
+    PreviewRowPatch:
+      type: object
+      required: [rowId]
+      properties:
+        rowId:
+          type: string
+        zhText:
+          type: string
+        enText:
+          type: string
+        dictionaryText:
+          type: string
+    TaskSnapshot:
+      type: object
+      required: [id, taskId, version, kind, standardDocuments, previewRows, conflictSummary, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/SnapshotKind"
+        standardDocuments:
+          type: array
+          items:
+            $ref: "#/components/schemas/StandardI18nDocument"
+        previewRows:
+          type: array
+          items:
+            $ref: "#/components/schemas/PreviewRow"
+        conflictSummary:
+          $ref: "#/components/schemas/ConflictCheckResponse"
+        validationErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        exportManifest:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    TaskImportResponse:
+      type: object
+      required: [task, snapshot, requestId]
+      properties:
+        task:
+          $ref: "#/components/schemas/TranslationTask"
+        snapshot:
+          $ref: "#/components/schemas/TaskSnapshot"
+        requestId:
+          type: string
+    TaskSnapshotResponse:
+      type: object
+      required: [snapshot, requestId]
+      properties:
+        snapshot:
+          $ref: "#/components/schemas/TaskSnapshot"
+        requestId:
+          type: string
+    SaveTaskRequest:
+      type: object
+      required: [snapshotVersion, syncDictionary]
+      properties:
+        snapshotVersion:
+          type: integer
+          minimum: 1
+        syncDictionary:
+          type: boolean
+          description: Whether to write resolved preview rows into Dictionary
+        conflictResolutions:
+          type: array
+          items:
+            type: object
+            required: [conflictId, resolution]
+            properties:
+              conflictId:
+                type: string
+                format: uuid
+              resolution:
+                $ref: "#/components/schemas/ConflictResolution"
+    DictionarySyncResult:
+      type: object
+      required: [created, updated, skipped]
+      properties:
+        created:
+          type: integer
+        updated:
+          type: integer
+        skipped:
+          type: integer
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DictionaryConflict"
+    ValidationResponse:
+      type: object
+      required: [valid, errors, requestId]
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        requestId:
+          type: string
+    ValidationError:
+      type: object
+      required: [code, message]
+      properties:
+        rowId:
+          type: string
+        key:
+          type: string
+        code:
+          type: string
+          enum: [MISSING_KEY, MISSING_ZH_TEXT, MISSING_EN_TEXT, MISSING_FINAL_EN_TEXT, KEY_MISMATCH, UNSUPPORTED_VALUE]
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error, requestId]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+        requestId:
+          type: string

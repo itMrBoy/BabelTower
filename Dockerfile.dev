@@ -1,0 +1,9 @@
+# BabelTower 开发模式 Dockerfile
+FROM node:24-alpine
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+COPY . .
+
+CMD npx prisma db push && npm run dev

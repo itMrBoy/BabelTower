@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # 1. Lint 检查
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+
+  # 2. TypeScript 类型检查
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+        # 前端类型错误会在此步骤暴露
+
+  # 3. Prisma Schema 校验
+  prisma-validate:
+    name: Prisma Schema Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma validate
+        # 数据库模型问题会在此步骤暴露
+
+  # 4. OpenAPI 契约校验
+  openapi-validate:
+    name: OpenAPI Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npx @redocly/cli lint openapi/babeltower.v1.yaml
+        # API 契约问题会在此步骤暴露
+
+  # 5. 单元测试
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: babeltower
+          POSTGRES_PASSWORD: babeltower
+          POSTGRES_DB: babeltower_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm test
+        env:
+          DATABASE_URL: "postgresql://babeltower:babeltower@localhost:5432/babeltower_test?schema=public"
+        # 解析器、冲突检测、API 逻辑错误会在此步骤暴露
