@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {"key": "app.title", "zh": "你好世界", "en": "Hello World", "source_file": "common.json", "line_number": 1},
+    {"key": "app.description", "zh": "这是一个示例应用", "en": "This is a sample app", "source_file": "common.json", "line_number": 2},
+    {"key": "app.save", "zh": "保存", "en": "Save", "source_file": "common.json", "line_number": 3},
+    {"key": "app.cancel", "zh": "取消", "en": "Cancel", "source_file": "common.json", "line_number": 4},
+    {"key": "app.delete", "zh": "删除", "en": "Delete", "source_file": "common.json", "line_number": 5},
+    {"key": "app.confirm", "zh": "确认", "en": "Confirm", "source_file": "common.json", "line_number": 6},
+    {"key": "app.loading", "zh": "加载中...", "en": "Loading...", "source_file": "common.json", "line_number": 7},
+    {"key": "app.error", "zh": "发生错误", "en": "An error occurred", "source_file": "common.json", "line_number": 8},
+    {"key": "app.retry", "zh": "重试", "en": "Retry", "source_file": "common.json", "line_number": 9},
+    {"key": "app.close", "zh": "关闭", "en": "Close", "source_file": "common.json", "line_number": 10}
+  ],
+  "metadata": {
+    "source_format": "nested_json",
+    "source_file": "common.json",
+    "total_entries": 10,
+    "parsed_at": "2026-05-15T00:00:00Z"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "comment": "Two-file key mismatch fixture B. Pair with two-files-mismatch-A.json. Differences vs A: missing user.logout, user.settings; extra user.register, billing.*; loading -> 加载中... (high_similarity vs A's 加载中); errors.timeout zh same but en will differ if both are loaded against same zh; nested key dimension differs for app.title (string vs object).",
+  "app": {
+    "title": {
+      "zh": "你好世界",
+      "en": "Hello World"
+    },
+    "save": "保存",
+    "cancel": "取消",
+    "loading_short": "加载中..."
+  },
+  "user": {
+    "login": "登录",
+    "profile": "个人资料",
+    "register": "注册"
+  },
+  "errors": {
+    "network": "网络错误",
+    "timeout": "请求超时",
+    "forbidden": "禁止访问"
+  },
+  "billing": {
+    "checkout": "结账",
+    "invoice": "发票"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "common": {
+    "ok": "确定",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "loading": "加载中…"
+  },
+  "auth": {
+    "login": "登录",
+    "logout": "退出",
+    "register": "注册",
+    "forgotPassword": "忘记密码？"
+  },
+  "dashboard": {
+    "title": "营销控制台",
+    "welcome": "欢迎使用",
+    "metrics": {
+      "active": "活跃用户",
+      "newSignups": "新注册",
+      "totalRevenue": "营收"
+    }
+  },
+  "errors": {
+    "networkError": "网络异常，请稍后再试",
+    "permissionDenied": "权限不足",
+    "notFound": "页面未找到"
+  }
+}

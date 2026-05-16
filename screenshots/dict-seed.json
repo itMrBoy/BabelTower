@@ -1,0 +1,17 @@
+[
+  {"chineseText":"确定","englishText":"OK","tags":["button","common"]},
+  {"chineseText":"取消","englishText":"Cancel","tags":["button","common"]},
+  {"chineseText":"保存","englishText":"Save","tags":["button","common"]},
+  {"chineseText":"删除","englishText":"Delete","tags":["button","common"]},
+  {"chineseText":"加载中…","englishText":"Loading…","tags":["status"]},
+  {"chineseText":"登录","englishText":"Sign in","tags":["auth"]},
+  {"chineseText":"退出","englishText":"Sign out","tags":["auth"]},
+  {"chineseText":"注册","englishText":"Sign up","tags":["auth"]},
+  {"chineseText":"营销控制台","englishText":"Marketing Console","tags":["dashboard","title"]},
+  {"chineseText":"欢迎使用","englishText":"Welcome","tags":["dashboard"]},
+  {"chineseText":"活跃用户","englishText":"Active users","tags":["metric"]},
+  {"chineseText":"新注册","englishText":"New signups","tags":["metric"]},
+  {"chineseText":"营收","englishText":"Revenue","tags":["metric"]},
+  {"chineseText":"权限不足","englishText":"Permission denied","tags":["error"]},
+  {"chineseText":"页面未找到","englishText":"Page not found","tags":["error"]}
+]

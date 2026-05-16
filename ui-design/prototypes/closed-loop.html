@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BabelTower — Closed Loop Prototype (v2)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        brand: { 50:'#EFF6FF',100:'#DBEAFE',500:'#2563EB',600:'#1D4ED8',700:'#1E40AF' },
+        sidebar: { bg:'#1E293B', text:'#CBD5E1', active:'#2563EB' }
+      }
+    }
+  }
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  body { font-family: 'Inter','PingFang SC','Microsoft YaHei', system-ui, sans-serif; }
+  .mono { font-family: 'JetBrains Mono','Fira Code', monospace; }
+  .scene { scroll-margin-top: 16px; }
+  .conflict-exact { border-left: 4px solid #DC2626; background: #FEF2F2; }
+  .conflict-similar { border-left: 4px solid #F59E0B; background: #FFFBEB; }
+  .conflict-duplicate { border-left: 4px solid #6366F1; background: #EEF2FF; }
+  .conflict-parse { border-left: 4px dashed #DC2626; background: #FEF2F2; }
+  .dict-hit { background: #ECFDF5; color: #047857; }
+  .dict-miss { color: #94A3B8; font-style: italic; }
+  .scene-anchor::before { content: '#'; color: #94A3B8; margin-right: 4px; }
+</style>
+</head>
+
+<body class="bg-slate-100 text-slate-900">
+
+<!-- ============================================================ -->
+<!-- 顶部导航：场景目录 -->
+<!-- ============================================================ -->
+<header class="bg-slate-900 text-white sticky top-0 z-30 shadow-lg">
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">BT</div>
+      <div>
+        <p class="font-semibold text-base">BabelTower — Closed Loop UI v2</p>
+        <p class="text-xs text-slate-400">闭环补缺设计稿 · 赵刚 · UI Designer</p>
+      </div>
+    </div>
+    <nav class="hidden md:flex items-center gap-1 text-sm">
+      <a href="#projects" class="px-3 py-1.5 rounded hover:bg-white/10">项目管理</a>
+      <a href="#project-tasks" class="px-3 py-1.5 rounded hover:bg-white/10">任务清单</a>
+      <a href="#dual-upload" class="px-3 py-1.5 rounded hover:bg-white/10">双文件</a>
+      <a href="#dict-entry" class="px-3 py-1.5 rounded hover:bg-white/10">字典录入</a>
+      <a href="#conflict-modals" class="px-3 py-1.5 rounded hover:bg-white/10">冲突弹窗</a>
+      <a href="#states" class="px-3 py-1.5 rounded hover:bg-white/10">状态库</a>
+      <a href="#mobile-fallback" class="px-3 py-1.5 rounded hover:bg-white/10">移动端</a>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-8 space-y-16">
+
+  <!-- ============================================================ -->
+  <!-- 0. 设计语言提醒（开发对照） -->
+  <!-- ============================================================ -->
+  <section class="bg-white rounded-2xl border border-slate-200 p-6">
+    <h2 class="text-lg font-semibold text-slate-800 mb-2">本文档定位</h2>
+    <p class="text-sm text-slate-600 leading-relaxed">
+      本原型 <span class="font-semibold">不是替代主原型</span>，而是补齐之前 5 张 Pencil + <code class="mono text-xs bg-slate-100 px-1 rounded">all-pages.html</code> 没有覆盖的「闭环缺口」：
+      项目管理、字典录入弹窗、双文件 4 列预览、key 不一致校验、任务列表项目维度、空/加载/错误/500/成功状态、移动端降级。
+      开发必须按这两份原型（v1 主页面 + v2 闭环）以及 <code class="mono text-xs bg-slate-100 px-1 rounded">handoff-checklist.md</code> 还原，不允许自创风格。
+    </p>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 1. 项目管理（PRD 5.5） -->
+  <!-- ============================================================ -->
+  <section id="projects" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">项目管理</h2>
+      <p class="text-xs text-slate-500">对应 PRD 5.5 ｜ 解决用户截图「请先创建或选择项目」的入口缺失</p>
+    </header>
+
+    <!-- 1.1 项目列表 -->
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-slate-800">我的项目</h3>
+          <p class="text-xs text-slate-500 mt-0.5">字典全局通用；任务和文件归属于项目</p>
+        </div>
+        <button class="bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          新建项目
+        </button>
+      </div>
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-500">
+          <tr>
+            <th class="text-left font-medium px-6 py-3">项目</th>
+            <th class="text-left font-medium px-6 py-3">默认格式</th>
+            <th class="text-left font-medium px-6 py-3">最近任务</th>
+            <th class="text-left font-medium px-6 py-3">未解决冲突</th>
+            <th class="text-left font-medium px-6 py-3">更新时间</th>
+            <th class="text-left font-medium px-6 py-3 w-24"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-4">
+              <p class="font-medium text-slate-800">mobile-app</p>
+              <p class="text-xs text-slate-500">移动端 · zh-CN → en-US</p>
+            </td>
+            <td class="px-6 py-4 mono text-xs text-slate-600">JSON</td>
+            <td class="px-6 py-4 text-slate-700">TASK-4A2B · app_v3.2.json</td>
+            <td class="px-6 py-4"><span class="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-medium">3</span></td>
+            <td class="px-6 py-4 text-slate-500">2 分钟前</td>
+            <td class="px-6 py-4"><button class="text-brand-600 hover:underline text-sm font-medium">进入</button></td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-4">
+              <p class="font-medium text-slate-800">java-server</p>
+              <p class="text-xs text-slate-500">服务端 · zh-CN + en-US（双文件）</p>
+            </td>
+            <td class="px-6 py-4 mono text-xs text-slate-600">.properties</td>
+            <td class="px-6 py-4 text-slate-700">TASK-3F1C · errors.properties</td>
+            <td class="px-6 py-4"><span class="text-emerald-600 text-xs font-medium">— 无</span></td>
+            <td class="px-6 py-4 text-slate-500">昨天 17:08</td>
+            <td class="px-6 py-4"><button class="text-brand-600 hover:underline text-sm font-medium">进入</button></td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-4">
+              <p class="font-medium text-slate-800">browser-extension</p>
+              <p class="text-xs text-slate-500">浏览器扩展 · zh-CN → en-US</p>
+            </td>
+            <td class="px-6 py-4 mono text-xs text-slate-600">JSON</td>
+            <td class="px-6 py-4 text-slate-700">TASK-2E0D · popup.zh-CN.json</td>
+            <td class="px-6 py-4"><span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-medium">5 相似</span></td>
+            <td class="px-6 py-4 text-slate-500">3 天前</td>
+            <td class="px-6 py-4"><button class="text-brand-600 hover:underline text-sm font-medium">进入</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 1.2 新建项目对话框（始终展示，作为设计稿） -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+        <header>
+          <p class="text-xs text-slate-500 uppercase tracking-wider">Dialog · 新建项目</p>
+          <h3 class="text-lg font-semibold text-slate-800 mt-1">为团队建立一个新 i18n 项目</h3>
+        </header>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">项目名称</span>
+          <input class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500" value="mobile-app">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">默认文件格式 <span class="text-slate-400 text-xs">（同项目内不允许混合）</span></span>
+          <div class="mt-2 grid grid-cols-2 gap-3">
+            <div class="border-2 border-brand-500 bg-brand-50 rounded-lg px-3 py-2 text-sm font-medium text-brand-700 cursor-pointer">JSON</div>
+            <div class="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 cursor-pointer hover:border-slate-300">.properties</div>
+          </div>
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">导入模式</span>
+          <div class="mt-2 space-y-2">
+            <label class="flex items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:border-brand-300">
+              <input type="radio" name="mode" checked class="mt-1">
+              <div>
+                <p class="text-sm font-medium text-slate-800">单中文文件</p>
+                <p class="text-xs text-slate-500 mt-0.5">系统按字典回填英文列，PRD 5.3</p>
+              </div>
+            </label>
+            <label class="flex items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:border-brand-300">
+              <input type="radio" name="mode" class="mt-1">
+              <div>
+                <p class="text-sm font-medium text-slate-800">中文 + 英文双文件</p>
+                <p class="text-xs text-slate-500 mt-0.5">4 列预览，字典填充列 + 原英文列，PRD 5.4</p>
+              </div>
+            </label>
+          </div>
+        </label>
+        <div class="flex justify-end gap-3 pt-2">
+          <button class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+          <button class="px-4 py-2 text-sm bg-brand-500 hover:bg-brand-600 text-white rounded-lg font-medium">创建项目</button>
+        </div>
+      </div>
+
+      <!-- 1.3 项目空状态 -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col items-center justify-center text-center">
+        <p class="text-xs text-slate-500 uppercase tracking-wider self-start">Empty · 没有项目</p>
+        <div class="mt-6 w-20 h-20 rounded-2xl bg-brand-50 flex items-center justify-center">
+          <svg class="w-10 h-10 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+        </div>
+        <h3 class="mt-4 text-lg font-semibold text-slate-800">还没有项目</h3>
+        <p class="mt-2 text-sm text-slate-500 max-w-xs">先创建一个项目，然后导入第一份中文字典文件。同一项目下，所有任务和文件结构保持一致。</p>
+        <button class="mt-6 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium rounded-lg">创建第一个项目</button>
+        <a href="#projects" class="mt-3 text-xs text-slate-500 hover:text-slate-700">了解 BabelTower 的项目模型 →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 2. 项目内任务清单（最近 vs 历史） -->
+  <!-- ============================================================ -->
+  <section id="project-tasks" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">任务清单（项目维度）</h2>
+      <p class="text-xs text-slate-500">对应 PRD 5.5 ｜ 最近一次可编辑 + 历史只读</p>
+    </header>
+
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <!-- 项目头 -->
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <div class="flex items-center gap-3">
+          <button class="text-slate-400 hover:text-slate-700"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></button>
+          <div>
+            <p class="font-semibold text-slate-800">mobile-app</p>
+            <p class="text-xs text-slate-500">JSON · zh-CN → en-US · 共 12 个任务</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-300 rounded-lg hover:bg-white">导出最近任务</button>
+          <button class="px-3 py-1.5 text-sm bg-brand-500 text-white rounded-lg font-medium">+ 新建任务（导入文件）</button>
+        </div>
+      </div>
+
+      <!-- 最近任务（可编辑） -->
+      <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 bg-emerald-50/40">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wider">最近一次任务 · 可编辑</p>
+      </div>
+      <div class="px-6 py-5 border-b border-slate-100 hover:bg-slate-50">
+        <div class="flex items-start justify-between">
+          <div>
+            <p class="font-semibold text-slate-800">TASK-4A2B · app_v3.2.json</p>
+            <p class="text-xs text-slate-500 mt-1">847 entries · 已暂存 · 5 项未解决冲突 · 上次保存 2 分钟前</p>
+          </div>
+          <button class="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white text-sm rounded-lg font-medium">继续编辑</button>
+        </div>
+      </div>
+
+      <!-- 历史任务（只读） -->
+      <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">历史任务 · 只读</p>
+      </div>
+      <table class="w-full text-sm">
+        <thead class="bg-white text-slate-500">
+          <tr>
+            <th class="text-left font-medium px-6 py-3">任务</th>
+            <th class="text-left font-medium px-6 py-3">条目</th>
+            <th class="text-left font-medium px-6 py-3">保存状态</th>
+            <th class="text-left font-medium px-6 py-3">冲突</th>
+            <th class="text-left font-medium px-6 py-3">更新时间</th>
+            <th class="text-left font-medium px-6 py-3 w-24"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-4 mono text-xs text-slate-700">TASK-3F1C · app_v3.1.json</td>
+            <td class="px-6 py-4">812</td>
+            <td class="px-6 py-4"><span class="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded text-xs">Saved</span></td>
+            <td class="px-6 py-4 text-slate-500">0</td>
+            <td class="px-6 py-4 text-slate-500">2 天前</td>
+            <td class="px-6 py-4"><button class="text-brand-600 hover:underline text-xs">查看 / 导出</button></td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-4 mono text-xs text-slate-700">TASK-2E0D · errors.json</td>
+            <td class="px-6 py-4">56</td>
+            <td class="px-6 py-4"><span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs">Partial</span></td>
+            <td class="px-6 py-4 text-amber-700">3</td>
+            <td class="px-6 py-4 text-slate-500">5 天前</td>
+            <td class="px-6 py-4"><button class="text-brand-600 hover:underline text-xs">查看 / 导出</button></td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-4 mono text-xs text-slate-700">TASK-1B9A · legacy.json</td>
+            <td class="px-6 py-4 text-slate-400">—</td>
+            <td class="px-6 py-4"><span class="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs">Failed</span></td>
+            <td class="px-6 py-4 text-red-700">format_parse_error</td>
+            <td class="px-6 py-4 text-slate-500">1 周前</td>
+            <td class="px-6 py-4"><button class="text-brand-600 hover:underline text-xs">查看错误</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 3. 双文件模式上传 + 4 列预览 + key 校验 -->
+  <!-- ============================================================ -->
+  <section id="dual-upload" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">双文件模式：上传 → 4 列预览</h2>
+      <p class="text-xs text-slate-500">对应 PRD 5.4 ｜ 4 列编辑：key · 中文 · 原英文 · 字典填充列</p>
+    </header>
+
+    <!-- 3.1 双文件上传 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
+      <h3 class="font-semibold text-slate-800">同时上传 zh-CN + en-US 两个文件</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="border-2 border-dashed border-emerald-300 bg-emerald-50/40 rounded-xl p-6 text-center">
+          <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wider">zh-CN 中文文件</p>
+          <p class="mt-4 mono text-sm text-slate-700">app.zh-CN.json</p>
+          <p class="text-xs text-slate-500 mt-1">847 entries · 2.4 MB</p>
+          <p class="text-xs text-emerald-700 mt-3">✓ 解析成功</p>
+        </div>
+        <div class="border-2 border-dashed border-blue-300 bg-blue-50/40 rounded-xl p-6 text-center">
+          <p class="text-xs font-semibold text-blue-700 uppercase tracking-wider">en-US 英文文件</p>
+          <p class="mt-4 mono text-sm text-slate-700">app.en-US.json</p>
+          <p class="text-xs text-slate-500 mt-1">843 entries · 2.3 MB</p>
+          <p class="text-xs text-blue-700 mt-3">✓ 解析成功</p>
+        </div>
+      </div>
+
+      <!-- 3.2 key 不一致校验列表 -->
+      <div id="dual-key-mismatch" class="border border-red-200 bg-red-50/50 rounded-xl p-4">
+        <header class="flex items-center justify-between">
+          <p class="text-sm font-semibold text-red-700">key 集合不一致 · 4 项校验错误（保存前必须修复）</p>
+          <button class="text-xs text-red-700 hover:underline">查看建议</button>
+        </header>
+        <ul class="mt-3 space-y-2 text-sm">
+          <li class="flex items-center gap-2">
+            <span class="mono text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded">仅中文有</span>
+            <span class="mono text-xs text-slate-700">app.dashboard.welcome</span>
+          </li>
+          <li class="flex items-center gap-2">
+            <span class="mono text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded">仅中文有</span>
+            <span class="mono text-xs text-slate-700">app.settings.theme.label</span>
+          </li>
+          <li class="flex items-center gap-2">
+            <span class="mono text-xs bg-white border border-blue-200 text-blue-700 px-2 py-0.5 rounded">仅英文有</span>
+            <span class="mono text-xs text-slate-700">auth.session.expired</span>
+          </li>
+          <li class="flex items-center gap-2">
+            <span class="mono text-xs bg-white border border-blue-200 text-blue-700 px-2 py-0.5 rounded">仅英文有</span>
+            <span class="mono text-xs text-slate-700">errors.network.retry</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 3.3 4 列预览表 -->
+    <div id="dual-preview" class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <header class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-slate-800">PreviewTable · 4 列编辑模式</h3>
+          <p class="text-xs text-slate-500 mt-0.5">字典填充列只填命中字典的值；导出时字典填充列优先，原英文兜底</p>
+        </div>
+        <div class="flex items-center gap-2 text-sm">
+          <span class="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded text-xs">字典命中 312</span>
+          <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs">未命中 531</span>
+        </div>
+      </header>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm min-w-[800px]">
+          <thead class="bg-slate-50 text-slate-500 sticky top-0">
+            <tr>
+              <th class="text-left font-medium px-4 py-3 w-48">key</th>
+              <th class="text-left font-medium px-4 py-3">中文（可编辑）</th>
+              <th class="text-left font-medium px-4 py-3">原英文（可编辑）</th>
+              <th class="text-left font-medium px-4 py-3">字典填充（可编辑）</th>
+              <th class="text-left font-medium px-4 py-3 w-20"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-4 py-3 mono text-xs text-brand-700">common.save</td>
+              <td class="px-4 py-3">保存</td>
+              <td class="px-4 py-3 text-slate-700">Save</td>
+              <td class="px-4 py-3 dict-hit rounded">Save</td>
+              <td class="px-4 py-3 text-xs text-emerald-700">命中</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 mono text-xs text-brand-700">common.cancel</td>
+              <td class="px-4 py-3">取消</td>
+              <td class="px-4 py-3 text-slate-700">Cancel</td>
+              <td class="px-4 py-3 dict-hit rounded">Cancel</td>
+              <td class="px-4 py-3 text-xs text-emerald-700">命中</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 mono text-xs text-brand-700">auth.login.title</td>
+              <td class="px-4 py-3">登录</td>
+              <td class="px-4 py-3 text-slate-700">Log In</td>
+              <td class="px-4 py-3 dict-miss">— 未命中</td>
+              <td class="px-4 py-3 text-xs text-slate-500">用原英文</td>
+            </tr>
+            <tr class="conflict-similar">
+              <td class="px-4 py-3 mono text-xs text-brand-700">dashboard.greeting</td>
+              <td class="px-4 py-3">你好</td>
+              <td class="px-4 py-3">Hello there</td>
+              <td class="px-4 py-3"><span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs">字典：Hello</span></td>
+              <td class="px-4 py-3 text-xs text-amber-700">相似 87%</td>
+            </tr>
+            <tr class="conflict-exact">
+              <td class="px-4 py-3 mono text-xs text-brand-700">action.submit</td>
+              <td class="px-4 py-3">提交</td>
+              <td class="px-4 py-3">Send</td>
+              <td class="px-4 py-3"><span class="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs">字典：Submit</span></td>
+              <td class="px-4 py-3 text-xs text-red-700">中文同英文异</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <footer class="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-sm">
+        <p class="text-slate-500">保存校验：每行「原英文」或「字典填充」至少一个非空。当前 5 行全部通过。</p>
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-slate-700 hover:bg-white rounded">暂存</button>
+          <button class="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded font-medium">保存并同步字典</button>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 4. 字典录入抽屉（PRD 5.1） -->
+  <!-- ============================================================ -->
+  <section id="dict-entry" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">字典录入抽屉</h2>
+      <p class="text-xs text-slate-500">对应 PRD 5.1 ｜ 单条人工录入，保存前必走冲突检测</p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- 4.1 抽屉表单 -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+        <header class="flex items-center justify-between">
+          <h3 class="font-semibold text-slate-800">新增字典词条</h3>
+          <button class="text-slate-400 hover:text-slate-700"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </header>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">中文 <span class="text-red-500">*</span></span>
+          <input class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" value="确认提交">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">英文 <span class="text-red-500">*</span></span>
+          <input class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" value="Confirm Submit">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">所属模块 <span class="text-slate-400 text-xs">（可选）</span></span>
+          <input class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" value="common">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">备注 <span class="text-slate-400 text-xs">（可选）</span></span>
+          <textarea rows="2" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">表单二次确认按钮，区别于普通的「提交」（Submit）</textarea>
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">标签</span>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <span class="bg-brand-50 text-brand-700 px-2 py-1 rounded text-xs">action</span>
+            <span class="bg-brand-50 text-brand-700 px-2 py-1 rounded text-xs">form</span>
+            <button class="text-xs text-slate-500 border border-dashed border-slate-300 rounded px-2 py-1">+ 添加标签</button>
+          </div>
+        </label>
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+          <p class="font-semibold">⚠️ 保存前会做冲突检测</p>
+          <ul class="mt-1.5 space-y-0.5 ml-4 list-disc">
+            <li>已存在且英文一致 → 不重复写入</li>
+            <li>中文一致但英文不同 → 阻断保存，弹出冲突弹窗</li>
+            <li>中文相似度 ≥ 90% → 阻断保存，提示相似词</li>
+          </ul>
+        </div>
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button class="px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">取消</button>
+          <button class="px-3 py-2 text-sm bg-brand-500 hover:bg-brand-600 text-white rounded font-medium">保存到字典</button>
+        </div>
+      </div>
+
+      <!-- 4.2 已存在 / 重复 提示 -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-3">
+        <header>
+          <p class="text-xs text-slate-500 uppercase tracking-wider">Inline · 已存在提示</p>
+          <h3 class="text-base font-semibold text-slate-800 mt-1">中文 + 英文完全一致</h3>
+        </header>
+        <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
+          <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-semibold">已</div>
+          <div class="flex-1">
+            <p class="text-sm text-slate-800">字典中已存在「<span class="font-medium">保存</span> → <span class="font-medium">Save</span>」</p>
+            <p class="text-xs text-slate-500 mt-1">不会重复写入。更新时间：2024-03-15</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 5. 冲突弹窗（PRD 5.1） -->
+  <!-- ============================================================ -->
+  <section id="conflict-modals" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">冲突弹窗</h2>
+      <p class="text-xs text-slate-500">对应 PRD 5.1 ｜ 字典写入前的两类阻断弹窗</p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- 5.1 完全一致但英文不同 -->
+      <div class="bg-white rounded-2xl border border-red-200 shadow-lg overflow-hidden">
+        <header class="bg-red-50 px-6 py-4 border-b border-red-200">
+          <p class="text-xs font-semibold text-red-700 uppercase tracking-wider">EXACT_ZH_DIFF_TARGET</p>
+          <h3 class="text-lg font-semibold text-slate-900 mt-1">中文已存在，但英文不同</h3>
+          <p class="text-xs text-slate-600 mt-1">必须用户授权才能更新字典；否则只更新本任务，不同步字典。</p>
+        </header>
+        <div class="p-6 space-y-4">
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-xs text-slate-500 uppercase tracking-wider">字典中已有</p>
+              <p class="mt-1 font-medium text-slate-800">提交</p>
+              <p class="mt-0.5 text-emerald-700 mono">Submit</p>
+              <p class="text-xs text-slate-400 mt-1">2024-02-10 录入 · 12 个项目引用</p>
+            </div>
+            <div>
+              <p class="text-xs text-red-600 uppercase tracking-wider">本次待写入</p>
+              <p class="mt-1 font-medium text-slate-800">提交</p>
+              <p class="mt-0.5 text-red-700 mono">Send</p>
+              <p class="text-xs text-slate-400 mt-1">来自 app.zh-CN.json #L84</p>
+            </div>
+          </div>
+        </div>
+        <footer class="bg-slate-50 px-6 py-3 flex justify-end gap-2 border-t border-slate-200">
+          <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-white rounded">仅本任务沿用 Send（不写字典）</button>
+          <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-white rounded">保留字典 Submit</button>
+          <button class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded font-medium">授权更新字典为 Send</button>
+        </footer>
+      </div>
+
+      <!-- 5.2 相似度 ≥ 90% -->
+      <div class="bg-white rounded-2xl border border-amber-200 shadow-lg overflow-hidden">
+        <header class="bg-amber-50 px-6 py-4 border-b border-amber-200">
+          <p class="text-xs font-semibold text-amber-700 uppercase tracking-wider">SIMILAR_ZH ≥ 90%</p>
+          <h3 class="text-lg font-semibold text-slate-900 mt-1">检测到相似中文</h3>
+          <p class="text-xs text-slate-600 mt-1">默认阻断直接写入；用户可忽略相似、编辑后重试或合并。</p>
+        </header>
+        <div class="p-6 space-y-3 text-sm">
+          <div class="flex items-center justify-between p-3 bg-amber-50/60 rounded">
+            <div>
+              <p class="font-medium text-slate-800">你好</p>
+              <p class="text-xs text-emerald-700 mono mt-0.5">Hello</p>
+            </div>
+            <span class="bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-semibold">相似 92%</span>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-amber-50/60 rounded">
+            <div>
+              <p class="font-medium text-slate-800">您好</p>
+              <p class="text-xs text-emerald-700 mono mt-0.5">Hello there</p>
+            </div>
+            <span class="bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-semibold">相似 95%</span>
+          </div>
+          <div class="bg-white border border-slate-200 rounded p-3 mt-2">
+            <p class="text-xs text-slate-500">本次待写入</p>
+            <p class="mt-1 font-medium text-slate-800">你好啊</p>
+            <p class="mt-0.5 text-slate-700 mono">Hi there</p>
+          </div>
+        </div>
+        <footer class="bg-slate-50 px-6 py-3 flex justify-end gap-2 border-t border-slate-200">
+          <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-white rounded">编辑后重试</button>
+          <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-white rounded">忽略相似 · 强制写入</button>
+          <button class="px-3 py-1.5 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded font-medium">合并到「你好」</button>
+        </footer>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 6. 状态库（空 / 加载 / 错误 / 500 / 成功） -->
+  <!-- ============================================================ -->
+  <section id="states" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">通用状态库</h2>
+      <p class="text-xs text-slate-500">所有页面共用 · 开发不允许自创红框 / 灰底等土法提示</p>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- 空状态 -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col items-center text-center min-h-[280px] justify-center">
+        <p class="text-xs text-slate-400 uppercase tracking-wider self-start">Empty</p>
+        <svg class="w-12 h-12 text-slate-300 mt-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+        <p class="text-sm font-medium text-slate-700 mt-3">还没有内容</p>
+        <p class="text-xs text-slate-500 mt-1 max-w-[200px]">配色低饱和，避免抢主操作。次级文案最多 2 行。</p>
+        <button class="mt-4 text-xs px-3 py-1.5 border border-slate-300 rounded hover:bg-slate-50 text-slate-700">主行动按钮</button>
+      </div>
+
+      <!-- 加载状态：骨架 -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 min-h-[280px]">
+        <p class="text-xs text-slate-400 uppercase tracking-wider">Loading · Skeleton</p>
+        <div class="mt-4 space-y-3 animate-pulse">
+          <div class="h-4 bg-slate-200 rounded w-3/4"></div>
+          <div class="h-4 bg-slate-200 rounded"></div>
+          <div class="h-4 bg-slate-200 rounded w-5/6"></div>
+          <div class="grid grid-cols-3 gap-2 mt-4">
+            <div class="h-16 bg-slate-200 rounded"></div>
+            <div class="h-16 bg-slate-200 rounded"></div>
+            <div class="h-16 bg-slate-200 rounded"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 加载状态：进度条（解析中） -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 min-h-[280px]">
+        <p class="text-xs text-slate-400 uppercase tracking-wider">Loading · Pipeline</p>
+        <div class="mt-6 flex items-center gap-3 mb-4">
+          <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+          <p class="text-xs text-slate-600">Input · 已接收</p>
+        </div>
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-3 h-3 rounded-full bg-brand-500 animate-pulse"></div>
+          <p class="text-xs text-brand-700 font-medium">Parser · 正在解析 847 条</p>
+        </div>
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-3 h-3 rounded-full bg-slate-300"></div>
+          <p class="text-xs text-slate-400">Standard JSON · 待处理</p>
+        </div>
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-3 h-3 rounded-full bg-slate-300"></div>
+          <p class="text-xs text-slate-400">Conflict Check · 待处理</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="w-3 h-3 rounded-full bg-slate-300"></div>
+          <p class="text-xs text-slate-400">Database · 待处理</p>
+        </div>
+        <div class="mt-4 w-full bg-slate-100 rounded-full h-1.5">
+          <div class="bg-brand-500 h-1.5 rounded-full" style="width: 38%"></div>
+        </div>
+      </div>
+
+      <!-- 错误：业务前置缺失（对应用户截图） -->
+      <div id="error-no-project" class="bg-white rounded-2xl border border-slate-200 overflow-hidden min-h-[280px]">
+        <div class="bg-amber-50 border-b border-amber-200 px-6 py-3">
+          <p class="text-xs font-semibold text-amber-800 uppercase tracking-wider">⚠ 前置缺失</p>
+        </div>
+        <div class="p-6">
+          <p class="text-sm font-semibold text-slate-800">请先创建或选择项目</p>
+          <p class="text-xs text-slate-600 mt-1">所有翻译任务必须归属一个项目。字典本身是全局的，但导入文件需要 ProjectId 才能写 TaskSnapshot。</p>
+          <div class="mt-4 flex gap-2">
+            <button class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded font-medium">新建项目</button>
+            <button class="px-3 py-1.5 text-xs border border-slate-300 rounded text-slate-700">从已有项目选择</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 错误：500 -->
+      <div class="bg-white rounded-2xl border border-red-200 overflow-hidden min-h-[280px]">
+        <div class="bg-red-50 border-b border-red-200 px-6 py-3">
+          <p class="text-xs font-semibold text-red-800 uppercase tracking-wider">500 · 服务异常</p>
+        </div>
+        <div class="p-6">
+          <p class="text-sm font-semibold text-slate-800">导入失败：服务器内部错误</p>
+          <p class="text-xs text-slate-600 mt-1">已记录 traceId <code class="mono bg-slate-100 px-1 rounded">b7d2-3508</code>。可重试，或下载本地副本继续编辑。</p>
+          <details class="mt-3 text-xs text-slate-500">
+            <summary class="cursor-pointer">技术细节</summary>
+            <pre class="mt-2 bg-slate-900 text-slate-100 p-3 rounded mono text-[11px] overflow-x-auto">POST /api/tasks/import
+500 Internal Server Error
+parser: ENOENT prisma schema not migrated</pre>
+          </details>
+          <div class="mt-4 flex gap-2">
+            <button class="px-3 py-1.5 text-xs bg-red-600 text-white rounded font-medium">重试导入</button>
+            <button class="px-3 py-1.5 text-xs border border-slate-300 rounded text-slate-700">查看任务历史</button>
+            <button class="px-3 py-1.5 text-xs border border-slate-300 rounded text-slate-700">复制 traceId</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 成功：保存 -->
+      <div class="bg-white rounded-2xl border border-emerald-200 overflow-hidden min-h-[280px]">
+        <div class="bg-emerald-50 border-b border-emerald-200 px-6 py-3">
+          <p class="text-xs font-semibold text-emerald-800 uppercase tracking-wider">✓ 成功</p>
+        </div>
+        <div class="p-6">
+          <p class="text-sm font-semibold text-slate-800">任务已保存，字典已同步</p>
+          <ul class="mt-3 space-y-1 text-xs text-slate-600">
+            <li>· 847 条 entries 写入 TaskSnapshot</li>
+            <li>· 124 条新词写入 Dictionary</li>
+            <li>· 5 条冲突已按你的授权更新</li>
+            <li>· 3 条相似冲突标记为「沿用任务版本」</li>
+          </ul>
+          <div class="mt-4 flex gap-2">
+            <button class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded font-medium">前往导出</button>
+            <button class="px-3 py-1.5 text-xs border border-slate-300 rounded text-slate-700">返回任务列表</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 7. 移动端降级 -->
+  <!-- ============================================================ -->
+  <section id="mobile-fallback" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">移动端：只读 + 查询</h2>
+      <p class="text-xs text-slate-500">复杂编辑流程引导回桌面端；移动端聚焦查询与查看</p>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- 7.1 移动端字典搜索 -->
+      <div class="bg-slate-900 rounded-3xl p-3 shadow-xl">
+        <div class="bg-white rounded-2xl overflow-hidden" style="aspect-ratio: 9 / 19;">
+          <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+            <p class="font-semibold text-sm">字典检索</p>
+            <button class="text-xs text-slate-300">≡</button>
+          </div>
+          <div class="p-3 space-y-2">
+            <input class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" placeholder="搜索中文 / 英文 ...">
+            <div class="text-[10px] text-slate-500 uppercase tracking-wider mt-2">最近搜索</div>
+            <div class="space-y-2 text-xs">
+              <div class="p-2 border border-slate-200 rounded">
+                <p class="font-medium">保存</p>
+                <p class="text-emerald-700 mono">Save</p>
+              </div>
+              <div class="p-2 border border-slate-200 rounded">
+                <p class="font-medium">取消</p>
+                <p class="text-emerald-700 mono">Cancel</p>
+              </div>
+              <div class="p-2 border border-slate-200 rounded">
+                <p class="font-medium">登录</p>
+                <p class="text-emerald-700 mono">Log In</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7.2 移动端任务列表 -->
+      <div class="bg-slate-900 rounded-3xl p-3 shadow-xl">
+        <div class="bg-white rounded-2xl overflow-hidden" style="aspect-ratio: 9 / 19;">
+          <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+            <p class="font-semibold text-sm">mobile-app</p>
+            <button class="text-xs text-slate-300">⋯</button>
+          </div>
+          <div class="p-3 space-y-2 text-xs">
+            <div class="p-3 border border-emerald-200 bg-emerald-50/40 rounded">
+              <p class="text-[10px] text-emerald-700 uppercase tracking-wider">最近 · 可编辑</p>
+              <p class="mt-1 font-medium">TASK-4A2B</p>
+              <p class="text-slate-500">app_v3.2.json · 847 条</p>
+              <p class="text-amber-700 mt-1">5 项冲突</p>
+            </div>
+            <p class="text-[10px] text-slate-500 uppercase tracking-wider mt-3">历史</p>
+            <div class="p-3 border border-slate-200 rounded">
+              <p class="font-medium">TASK-3F1C</p>
+              <p class="text-slate-500">app_v3.1.json · 812 条</p>
+            </div>
+            <div class="p-3 border border-slate-200 rounded">
+              <p class="font-medium">TASK-2E0D</p>
+              <p class="text-slate-500">errors.json · 56 条</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7.3 编辑场景的桌面端引导 -->
+      <div class="bg-slate-900 rounded-3xl p-3 shadow-xl">
+        <div class="bg-white rounded-2xl overflow-hidden flex flex-col" style="aspect-ratio: 9 / 19;">
+          <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+            <p class="font-semibold text-sm">导入 / 编辑</p>
+          </div>
+          <div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-brand-50 flex items-center justify-center">
+              <svg class="w-7 h-7 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            </div>
+            <p class="mt-3 text-sm font-semibold text-slate-800">编辑请在桌面端完成</p>
+            <p class="text-xs text-slate-500 mt-2 leading-relaxed">导入文件、4 列预览、冲突处理涉及 1000+ 行表格，移动端展示不下。</p>
+            <button class="mt-4 px-3 py-1.5 bg-brand-500 text-white text-xs rounded">发送桌面打开链接到邮箱</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 8. 导出成功（PRD 5.3 / 5.4 收尾） -->
+  <!-- ============================================================ -->
+  <section id="export-success" class="scene space-y-4">
+    <header class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold text-slate-800 scene-anchor">导出成功 + 历史记录</h2>
+      <p class="text-xs text-slate-500">导出后回流：成功提示 + 历史导出可重新下载</p>
+    </header>
+
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <div class="bg-emerald-50 px-6 py-4 border-b border-emerald-200 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          <div>
+            <p class="text-sm font-semibold text-emerald-800">导出完成：mobile-app_zh-CN_en-US_v3.2.zip</p>
+            <p class="text-xs text-emerald-700">2 个文件 · 12.4 KB · 字典填充列优先 + 原英文兜底</p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button class="px-3 py-1.5 text-xs border border-emerald-300 text-emerald-700 rounded">复制下载链接</button>
+          <button class="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded font-medium">再次下载</button>
+        </div>
+      </div>
+      <div class="px-6 py-3 text-xs text-slate-500 uppercase tracking-wider">最近导出</div>
+      <table class="w-full text-sm">
+        <tbody class="divide-y divide-slate-100">
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-3 mono text-xs">mobile-app_v3.2_zh-en.zip</td>
+            <td class="px-6 py-3 text-slate-500">JSON · 847 entries</td>
+            <td class="px-6 py-3 text-slate-500">刚刚</td>
+            <td class="px-6 py-3 text-right"><button class="text-brand-600 hover:underline text-xs">重新下载</button></td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-3 mono text-xs">java-server_errors_v2.zip</td>
+            <td class="px-6 py-3 text-slate-500">.properties · 56 entries</td>
+            <td class="px-6 py-3 text-slate-500">昨天</td>
+            <td class="px-6 py-3 text-right"><button class="text-brand-600 hover:underline text-xs">重新下载</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 末尾说明 -->
+  <!-- ============================================================ -->
+  <footer class="border-t border-slate-200 pt-8 pb-12 text-center text-xs text-slate-500">
+    BabelTower Closed Loop UI v2 · 设计人：赵刚<br>
+    本原型与 <a href="./all-pages.html" class="text-brand-600 hover:underline">all-pages.html</a> 一并作为开发还原依据。
+    开发对照请打开 <code class="mono bg-slate-100 px-1 rounded">ui-design/handoff-checklist.md</code>。
+  </footer>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "common": {
+    "ok": "确定",
+    "save": "保存",
+    "loading": "加载中…"
+  },
+  "auth": {
+    "login": "登录"
+  },
+  "dashboard": {
+    "title": "营销控制台"
+  }
+}

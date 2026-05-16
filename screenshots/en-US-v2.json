@@ -1,0 +1,13 @@
+{
+  "common": {
+    "ok": "Confirm",
+    "save": "保存",
+    "loading": "Loading..."
+  },
+  "auth": {
+    "login": "Login"
+  },
+  "dashboard": {
+    "title": "Marketing Dashboard"
+  }
+}
