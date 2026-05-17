@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SearchIcon } from "@/components/icons";
 import { useMessage } from "@/components/message-provider";
 
@@ -29,6 +29,34 @@ function formatTime(value: string | null | undefined) {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
+class SearchCache {
+  private cache = new Map<string, { items: DictEntry[]; ts: number }>();
+  private maxSize = 20;
+  private ttl = 60_000;
+
+  get(key: string): DictEntry[] | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > this.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+    return entry.items;
+  }
+
+  set(key: string, items: DictEntry[]) {
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value as string;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, { items, ts: Date.now() });
+  }
+}
+
+const searchCache = new SearchCache();
+
 export default function DictionaryPage() {
   const [query, setQuery] = useState("");
   const [field, setField] = useState<Field>("auto");
@@ -37,45 +65,66 @@ export default function DictionaryPage() {
   const message = useMessage();
   const [hasSearched, setHasSearched] = useState(false);
   const [tagFilter, setTagFilter] = useState("all");
+  const abortRef = useRef<AbortController | null>(null);
 
-  const search = useCallback(async (q: string, f: Field) => {
-    const trimmed = q.trim();
-    if (!trimmed) {
-      setItems([]);
-      setHasSearched(false);
-            return;
-    }
-    setLoading(true);
-        try {
-      const url = `/api/dictionaries?q=${encodeURIComponent(trimmed)}&field=${f}&limit=100`;
-      const response = await fetch(url);
-      const text = await response.text();
-      const body = text ? (JSON.parse(text) as { items?: DictEntry[]; error?: { message?: string } }) : {};
-      if (!response.ok) {
-        const message = body.error?.message ?? `请求失败 (HTTP ${response.status})`;
-        throw new Error(message);
+  const search = useCallback(
+    async (q: string, f: Field) => {
+      const trimmed = q.trim();
+      if (!trimmed) {
+        setItems([]);
+        setHasSearched(false);
+        return;
       }
-      setItems(body.items ?? []);
-      setHasSearched(true);
-    } catch (err) {
-      setItems([]);
-      setHasSearched(true);
-      message.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+
+      const cacheKey = `${trimmed}|${f}`;
+      const cached = searchCache.get(cacheKey);
+      if (cached) {
+        setItems(cached);
+        setHasSearched(true);
+        return;
+      }
+
+      if (abortRef.current) {
+        abortRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      setLoading(true);
+      try {
+        const url = `/api/dictionaries?q=${encodeURIComponent(trimmed)}&field=${f}&limit=50`;
+        const response = await fetch(url, { signal: controller.signal });
+        const body = (await response.json()) as { items?: DictEntry[]; error?: { message?: string } };
+        if (!response.ok) {
+          const errMsg = body.error?.message ?? `请求失败 (HTTP ${response.status})`;
+          throw new Error(errMsg);
+        }
+        const result = body.items ?? [];
+        searchCache.set(cacheKey, result);
+        setItems(result);
+        setHasSearched(true);
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setItems([]);
+        setHasSearched(true);
+        message.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [message],
+  );
 
   // Debounce: refetch when the query/field changes after a short delay.
   useEffect(() => {
     if (!query.trim()) {
       setItems([]);
       setHasSearched(false);
-            return;
+      return;
     }
     const timer = window.setTimeout(() => {
       void search(query, field);
-    }, 300);
+    }, 150);
     return () => window.clearTimeout(timer);
   }, [query, field, search]);
 
@@ -105,17 +154,17 @@ export default function DictionaryPage() {
             }}
           >
             <div className="flex-1 relative">
-              <SearchIcon size={18} className="absolute left-3 top-2.5 text-slate-400" />
+              <SearchIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 placeholder="搜索 Dictionary：输入中文基准或英文译文..."
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-500"
+                className="w-full h-10 pl-10 pr-4 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-500"
               />
             </div>
             <select
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none w-[140px] flex-shrink-0 whitespace-nowrap"
+              className="h-10 text-sm border border-slate-200 rounded-lg px-3 bg-white text-slate-600 outline-none w-[140px] flex-shrink-0 whitespace-nowrap"
               value={field}
               onChange={(event) => setField(event.target.value as Field)}
               aria-label="搜索字段"
@@ -126,7 +175,7 @@ export default function DictionaryPage() {
             </select>
             <button
               type="submit"
-              className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-60 whitespace-nowrap flex-shrink-0"
+              className="h-10 px-4 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-60 whitespace-nowrap flex-shrink-0 inline-flex items-center justify-center gap-1.5"
               disabled={loading}
             >
               {loading ? "搜索中..." : "搜索"}

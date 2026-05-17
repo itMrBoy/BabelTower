@@ -34,6 +34,37 @@ function toResponse(entry: {
   };
 }
 
+// Server-side LRU cache for dictionary search queries.
+// TTL=30s prevents stale data; max 50 entries bounds memory.
+type CacheEntry = { items: ReturnType<typeof toResponse>[]; ts: number };
+const queryCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 30_000;
+const CACHE_MAX_SIZE = 50;
+
+function cacheKey(q: string, field: string, limit: number): string {
+  return `${q}|${field}|${limit}`;
+}
+
+function getCached(key: string): ReturnType<typeof toResponse>[] | null {
+  const entry = queryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL_MS) {
+    queryCache.delete(key);
+    return null;
+  }
+  queryCache.delete(key);
+  queryCache.set(key, entry);
+  return entry.items;
+}
+
+function setCached(key: string, items: ReturnType<typeof toResponse>[]) {
+  if (queryCache.size >= CACHE_MAX_SIZE) {
+    const firstKey = queryCache.keys().next().value as string;
+    queryCache.delete(firstKey);
+  }
+  queryCache.set(key, { items, ts: Date.now() });
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
@@ -42,21 +73,35 @@ export async function GET(request: NextRequest) {
   const field = searchParams.get("field") ?? "auto";
   const limit = parseLimit(searchParams.get("limit"));
   const normalized = normalizeText(q);
+
+  const key = cacheKey(normalized, field, limit);
+  const cached = getCached(key);
+  if (cached) {
+    return ok({ items: cached });
+  }
+
+  // Use startsWith when query length >= 2 to leverage B-tree index on normalized columns.
+  // Falls back to contains for shorter queries (more likely to need fuzzy match).
+  const usePrefixSearch = normalized.length >= 2;
+  const searchMode = usePrefixSearch ? "startsWith" : "contains";
+
   const where =
     field === "chinese"
-      ? { normalizedChinese: { contains: normalized, mode: "insensitive" as const } }
+      ? { normalizedChinese: { [searchMode]: normalized, mode: "insensitive" as const } }
       : field === "english"
-        ? { normalizedEnglish: { contains: normalized, mode: "insensitive" as const } }
+        ? { normalizedEnglish: { [searchMode]: normalized, mode: "insensitive" as const } }
         : {
             OR: [
-              { normalizedChinese: { contains: normalized, mode: "insensitive" as const } },
-              { normalizedEnglish: { contains: normalized, mode: "insensitive" as const } },
+              { normalizedChinese: { [searchMode]: normalized, mode: "insensitive" as const } },
+              { normalizedEnglish: { [searchMode]: normalized, mode: "insensitive" as const } },
             ],
           };
 
   try {
     const items = await prisma.dictionary.findMany({ where, take: limit, orderBy: { updatedAt: "desc" } });
-    return ok({ items: items.map(toResponse) });
+    const responseItems = items.map(toResponse);
+    setCached(key, responseItems);
+    return ok({ items: responseItems });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
       return ok({
