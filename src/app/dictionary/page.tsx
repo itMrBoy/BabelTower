@@ -64,7 +64,6 @@ export default function DictionaryPage() {
   const [loading, setLoading] = useState(false);
   const message = useMessage();
   const [hasSearched, setHasSearched] = useState(false);
-  const [tagFilter, setTagFilter] = useState("all");
   const abortRef = useRef<AbortController | null>(null);
 
   const search = useCallback(
@@ -128,19 +127,6 @@ export default function DictionaryPage() {
     return () => window.clearTimeout(timer);
   }, [query, field, search]);
 
-  const allTags = useMemo(() => {
-    const set = new Set<string>();
-    for (const entry of items) {
-      for (const tag of entry.tags ?? []) set.add(tag);
-    }
-    return Array.from(set).sort();
-  }, [items]);
-
-  const filtered = useMemo(() => {
-    if (tagFilter === "all") return items;
-    return items.filter((entry) => (entry.tags ?? []).includes(tagFilter));
-  }, [items, tagFilter]);
-
   return (
     <div className="p-6">
       <div className="max-w-6xl mx-auto space-y-5">
@@ -181,24 +167,11 @@ export default function DictionaryPage() {
               {loading ? "搜索中..." : "搜索"}
             </button>
           </form>
-          <div className="flex gap-2 flex-wrap items-center">
-            <select
-              className="text-xs border border-slate-200 rounded-md px-2.5 py-1.5 bg-white text-slate-600 outline-none whitespace-nowrap"
-              value={tagFilter}
-              onChange={(event) => setTagFilter(event.target.value)}
-              aria-label="标签筛选"
-            >
-              <option value="all">所有标签</option>
-              {allTags.map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs text-slate-500 self-center ml-2">
-              {hasSearched ? `共 ${filtered.length} 条记录` : "输入关键字开始检索"}
-            </span>
-          </div>
+          {hasSearched && (
+            <div className="text-xs text-slate-500">
+              共 {items.length} 条记录
+            </div>
+          )}
         </div>
 
 
@@ -224,14 +197,14 @@ export default function DictionaryPage() {
                     </td>
                   </tr>
                 )}
-                {hasSearched && filtered.length === 0 && (
+                {hasSearched && items.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-5 py-12 text-center text-sm text-slate-400">
                       未找到匹配的字典项。
                     </td>
                   </tr>
                 )}
-                {filtered.map((entry) => (
+                {items.map((entry) => (
                   <tr key={entry.id} className="hover:bg-blue-50/50 transition-colors">
                     <td className="px-5 py-2.5 text-slate-800 break-all">{entry.chineseText}</td>
                     <td className="px-5 py-2.5 text-slate-700 break-all">{entry.englishText}</td>
@@ -262,7 +235,7 @@ export default function DictionaryPage() {
             </table>
           </div>
           <div className="px-5 py-2.5 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 text-xs text-slate-500">
-            <span>{hasSearched ? `显示 ${filtered.length} / ${items.length} 条记录` : "等待检索"}</span>
+            <span>{hasSearched ? `显示 ${items.length} 条记录` : "等待检索"}</span>
             <span className="text-slate-400">数据源：/api/dictionaries</span>
           </div>
         </div>

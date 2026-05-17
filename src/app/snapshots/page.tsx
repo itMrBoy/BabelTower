@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  ChevronRightIcon,
+  ChevronDownIcon,
   CheckIcon,
   AlertTriangleIcon,
   FileXIcon,
@@ -172,7 +172,7 @@ export default function SnapshotsPage() {
             <h3 className="font-semibold text-sm text-slate-700">翻译任务历史</h3>
             <div className="flex items-center gap-2">
               <select
-                className="text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white text-slate-600 outline-none"
+                className="text-xs border border-slate-200 rounded-md px-2 h-8 bg-white text-slate-600 outline-none"
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
               >
@@ -186,7 +186,7 @@ export default function SnapshotsPage() {
               <button
                 type="button"
                 onClick={() => void loadTasks()}
-                className="text-xs text-slate-600 border border-slate-200 rounded-md px-2 py-1.5 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                className="text-xs text-slate-600 border border-slate-200 rounded-md px-2 h-8 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
                 disabled={loadingTasks}
               >
                 <RefreshCwIcon size={12} /> {loadingTasks ? "加载中" : "刷新"}
@@ -266,7 +266,7 @@ export default function SnapshotsPage() {
                             });
                           }}
                         >
-                          查看快照 <ChevronRightIcon size={12} />
+                          查看快照 <ChevronDownIcon size={12} />
                         </button>
                       </div>
                     </td>
