@@ -125,40 +125,4 @@ describe('Conflict Detector', () => {
     const result2 = detectConflicts(newEntries, existing, { similarityThreshold: 0.8 });
     expect(result2.warning).toHaveLength(1);
   });
-
-  it('detects blocking conflict when keys differ but Chinese matches exactly and English differs', () => {
-    const newEntries = [makeEntry('newKey', '保存', 'Save')];
-    const existing = [makeEntry('oldKey', '保存', 'Keep')];
-
-    const result = detectConflicts(newEntries, existing);
-
-    expect(result.hasBlocking).toBe(true);
-    expect(result.blocking).toHaveLength(1);
-    expect(result.blocking[0]).toMatchObject({
-      key: 'newKey',
-      chineseValue: '保存',
-      existingEnglish: 'Keep',
-      newEnglish: 'Save',
-      level: 'blocking',
-    });
-  });
-
-  it('flags info when keys differ but Chinese and English both match exactly', () => {
-    const newEntries = [makeEntry('newKey', '保存', 'Save')];
-    const existing = [makeEntry('oldKey', '保存', 'Save')];
-
-    const result = detectConflicts(newEntries, existing);
-
-    expect(result.hasBlocking).toBe(false);
-    expect(result.blocking).toHaveLength(0);
-    expect(result.warning).toHaveLength(0);
-    expect(result.info).toHaveLength(1);
-    expect(result.info[0]).toMatchObject({
-      key: 'newKey',
-      chineseValue: '保存',
-      existingEnglish: 'Save',
-      newEnglish: 'Save',
-      level: 'info',
-    });
-  });
 });

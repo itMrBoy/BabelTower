@@ -18,8 +18,7 @@ import { exportToProperties } from '../exporter/properties-exporter';
 // ── Validation ──
 
 export interface ValidationError {
-  field?: string;
-  code?: string;
+  field: string;
   message: string;
 }
 

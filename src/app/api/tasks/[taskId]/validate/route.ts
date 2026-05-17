@@ -3,6 +3,7 @@ import { ConflictSeverity } from "@prisma/client";
 import { validateDocument } from "@/domain/persistence/save-service";
 import type { PreviewRow, StandardI18nDocument } from "@/domain/standard-i18n/types";
 import { fail, ok } from "@/lib/api";
+import { countUnresolvedBlocking, getLocalSnapshot, isDatabaseUnavailable } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import { rowsToDocument } from "@/lib/standard";
 
@@ -12,27 +13,39 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
   const version = Number(body.snapshotVersion);
   if (!version) return fail("snapshotVersion is required", 400);
 
-  const snapshot = await prisma.taskSnapshot.findUnique({ where: { taskId_version: { taskId, version } } });
-  if (!snapshot) return fail("snapshot not found", 404);
+  try {
+    const snapshot = await prisma.taskSnapshot.findUnique({ where: { taskId_version: { taskId, version } } });
+    if (!snapshot) return fail("snapshot not found", 404);
 
-  const docs = snapshot.standardDocuments as { source?: StandardI18nDocument } | null;
-  const rows = snapshot.previewRows as unknown as PreviewRow[];
-  const document = docs?.source ? rowsToDocument(rows, docs.source) : undefined;
-  const validation = document ? validateDocument(document) : { valid: false, errors: [{ field: "standardDocuments", message: "source document missing" }] };
-  const unresolvedBlocking = await prisma.dictionaryConflict.count({
-    where: { taskId, severity: ConflictSeverity.BLOCKING, resolvedAt: null },
-  });
+    const docs = snapshot.standardDocuments as { source?: StandardI18nDocument } | null;
+    const rows = snapshot.previewRows as unknown as PreviewRow[];
+    const document = docs?.source ? rowsToDocument(rows, docs.source) : undefined;
+    const validation = document ? validateDocument(document) : { valid: false, errors: [{ field: "standardDocuments", message: "source document missing" }] };
+    const unresolvedBlocking = await prisma.dictionaryConflict.count({
+      where: { taskId, severity: ConflictSeverity.BLOCKING, resolvedAt: null },
+    });
 
-  const errors = [...validation.errors];
-  if (unresolvedBlocking > 0) {
-    errors.push({
-      code: "MISSING_FINAL_EN_TEXT" as const,
-      message: `${unresolvedBlocking} blocking conflict${unresolvedBlocking > 1 ? "s" : ""} unresolved`,
+    return ok({
+      valid: validation.valid && unresolvedBlocking === 0,
+      validationErrors: validation.errors,
+      unresolvedBlocking,
+    });
+  } catch (error) {
+    if (!isDatabaseUnavailable(error)) {
+      return fail("task validation failed", 500, error instanceof Error ? error.message : String(error));
+    }
+    const snapshot = getLocalSnapshot(taskId, version);
+    if (!snapshot) return fail("snapshot not found", 404);
+    const docs = snapshot.standardDocuments;
+    const rows = snapshot.previewRows;
+    const document = docs.source ? rowsToDocument(rows, docs.source) : undefined;
+    const validation = document ? validateDocument(document) : { valid: false, errors: [{ field: "standardDocuments", message: "source document missing" }] };
+    const unresolvedBlocking = countUnresolvedBlocking(taskId);
+    return ok({
+      valid: validation.valid && unresolvedBlocking === 0,
+      validationErrors: validation.errors,
+      unresolvedBlocking,
+      localFallback: true,
     });
   }
-
-  return ok({
-    valid: errors.length === 0,
-    errors,
-  });
 }

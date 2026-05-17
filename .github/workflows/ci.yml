@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # npm ci runs package postinstall -> prisma generate; it needs DATABASE_URL to exist,
+  # but validation/generation do not connect to this placeholder database.
+  DATABASE_URL: "postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
+
 jobs:
   # 1. Lint 检查
   lint:
@@ -93,3 +98,21 @@ jobs:
         env:
           DATABASE_URL: "postgresql://babeltower:babeltower@localhost:5432/babeltower_test?schema=public"
         # 解析器、冲突检测、API 逻辑错误会在此步骤暴露
+
+  # 6. Next.js 生产构建
+  build:
+    name: Next.js Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run build
+        env:
+          # prisma generate / next build 需要变量存在，连接性不要求
+          DATABASE_URL: "postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
+        # 生产构建失败（缺依赖、TSX 引入丢失、output 配置异常）会在此步骤暴露

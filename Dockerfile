@@ -3,12 +3,15 @@
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Stage 2: 构建应用
 FROM node:24-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 RUN npm ci
 COPY . .
 RUN npx prisma generate
@@ -28,7 +31,11 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
-COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma
+# Prisma 生成文件在 builder 阶段创建，必须从 builder 复制
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+
+# 安装与项目兼容的 Prisma CLI（用于容器内执行迁移/推送）
+RUN npm install -g prisma@^6.7.0
 
 USER nextjs
 

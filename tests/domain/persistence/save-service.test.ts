@@ -48,7 +48,7 @@ describe('validateDocument', () => {
     const doc = makeDoc([{ key: '' }]);
     const result = validateDocument(doc);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.field?.includes('key'))).toBe(true);
+    expect(result.errors.some((e) => e.field.includes('key'))).toBe(true);
   });
 
   it('fails on entries with null sourceValue and null translatedValue', () => {

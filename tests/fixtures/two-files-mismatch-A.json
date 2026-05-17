@@ -1,0 +1,22 @@
+{
+  "comment": "Two-file key mismatch fixture A. Pair with two-files-mismatch-B.json. A and B share some keys but differ in coverage and a few translations to trigger the full conflict matrix (key-only-in-A, key-only-in-B, exact_zh_diff_target, high_similarity, identical).",
+  "app": {
+    "title": "你好世界",
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "confirm": "确认",
+    "loading_short": "加载中"
+  },
+  "user": {
+    "login": "登录",
+    "logout": "退出",
+    "profile": "个人资料",
+    "settings": "设置"
+  },
+  "errors": {
+    "network": "网络错误",
+    "timeout": "请求超时",
+    "unauthorized": "未授权访问"
+  }
+}
