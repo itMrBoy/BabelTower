@@ -1,7 +1,13 @@
 import { NextRequest } from "next/server";
 import { fail, ok, parseLimit } from "@/lib/api";
-import { createLocalProject, isDatabaseUnavailable, listLocalProjects } from "@/lib/local-store";
+import { createLocalProject, findLocalProjectByName, isDatabaseUnavailable, listLocalProjects } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
+
+function generateProjectCode() {
+  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `BT-${stamp}-${suffix}`;
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -29,14 +35,18 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const code = String(body.code ?? "").trim();
   const name = String(body.name ?? "").trim();
-  if (!code || !name) return fail("code and name are required", 400);
+  if (!name) return fail("name is required", 400);
 
   try {
+    const existing = await prisma.productProject.findFirst({
+      where: { name: { equals: name, mode: "insensitive" } },
+    });
+    if (existing) return ok({ project: existing, existed: true });
+
     const project = await prisma.productProject.create({
       data: {
-        code,
+        code: generateProjectCode(),
         name,
         description: body.description ?? null,
         createdById: body.createdById ?? null,
@@ -45,8 +55,10 @@ export async function POST(request: NextRequest) {
     return ok({ project }, 201);
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
+      const existing = findLocalProjectByName(name);
+      if (existing) return ok({ project: existing, existed: true, localFallback: true });
       const project = createLocalProject({
-        code,
+        code: generateProjectCode(),
         name,
         description: body.description ?? null,
         createdById: body.createdById ?? null,

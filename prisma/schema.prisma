@@ -10,6 +10,7 @@ datasource db {
 enum FileFormat {
   JSON
   PROPERTIES
+  TS
 }
 
 enum TaskMode {
@@ -119,14 +120,36 @@ model TranslationTask {
   targetFilename    String?              @map("target_filename") @db.VarChar(255)
   createdById       String?              @map("created_by_id") @db.Uuid
   savedAt           DateTime?            @map("saved_at")
+  dictionarySyncedAt DateTime?            @map("dictionary_synced_at")
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
   snapshots         TaskSnapshot[]
+  draftRows         TaskDraftRow[]
   conflicts         DictionaryConflict[]
 
   @@index([projectId, updatedAt], map: "translation_tasks_project_updated_idx")
   @@index([status, isEditable], map: "translation_tasks_status_editable_idx")
   @@map("translation_tasks")
+}
+
+model TaskDraftRow {
+  id              String          @id @default(uuid()) @db.Uuid
+  taskId          String          @map("task_id") @db.Uuid
+  task            TranslationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  rowKey          String          @map("row_key") @db.Text
+  rowIndex        Int             @map("row_index")
+  keyPath         Json            @map("key_path") @db.JsonB
+  sourceValue     String?         @map("source_value") @db.Text
+  translatedValue String?         @map("translated_value") @db.Text
+  status          String          @db.VarChar(64)
+  conflictLevel   String?         @map("conflict_level") @db.VarChar(32)
+  metadata        Json?           @db.JsonB
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@unique([taskId, rowKey], map: "task_draft_rows_task_row_key_uq")
+  @@index([taskId, rowIndex], map: "task_draft_rows_task_row_index_idx")
+  @@map("task_draft_rows")
 }
 
 model TaskSnapshot {

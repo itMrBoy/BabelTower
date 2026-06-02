@@ -31,7 +31,7 @@ export interface StandardI18nEntry {
 }
 
 // ── Supported source formats ──
-export type SourceFormat = 'json' | 'properties';
+export type SourceFormat = 'json' | 'properties' | 'ts';
 
 // ── Parsed i18n document ──
 export interface StandardI18nDocument {
@@ -44,6 +44,9 @@ export interface StandardI18nDocument {
   metadata?: Record<string, unknown>;
 }
 
+// ── Conflict types ──
+export type ConflictLevel = 'blocking' | 'warning' | 'info';
+
 // ── Preview row for UI display ──
 export interface PreviewRow {
   key: string;
@@ -51,10 +54,9 @@ export interface PreviewRow {
   sourceValue: string | null;
   translatedValue: string | null;
   status: EntryStatus;
+  /** Conflict severity from latest conflict-detector pass (undefined = no conflict on this row) */
+  conflictLevel?: ConflictLevel;
 }
-
-// ── Conflict types ──
-export type ConflictLevel = 'blocking' | 'warning' | 'info';
 
 export interface ConflictItem {
   key: string;

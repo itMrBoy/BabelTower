@@ -19,7 +19,7 @@ const DEFAULT_OPTIONS: Required<JsonExportOptions> = {
  * instead of `sourceValue` (i.e., dictionary values take precedence over the
  * source file values).
  */
-function buildNestedObject(
+export function buildNestedObject(
   entries: StandardI18nEntry[],
   dictionaryPriority: boolean,
 ): Record<string, unknown> {

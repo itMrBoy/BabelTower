@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { Prisma, SnapshotKind, TaskStatus } from "@prisma/client";
 import { fail, ok } from "@/lib/api";
 import {
   isDatabaseUnavailable,
@@ -9,6 +8,10 @@ import {
 import { prisma } from "@/lib/prisma";
 import { chineseHash, normalizeText } from "@/lib/standard";
 import type { PreviewRow } from "@/domain/standard-i18n/types";
+
+function sameNormalizedText(left: string, right: string) {
+  return normalizeText(left) === normalizeText(right);
+}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
   const { taskId } = await context.params;
@@ -35,6 +38,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     let skipped = 0;
 
     const result = await prisma.$transaction(async (tx) => {
+      const seenHashes = new Set<string>();
       for (const row of rows) {
         const chineseText = row.sourceValue?.trim();
         const englishText = row.translatedValue?.trim();
@@ -44,21 +48,51 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
         }
 
         const hash = chineseHash(chineseText);
+        if (seenHashes.has(hash)) {
+          skipped++;
+          continue;
+        }
+        seenHashes.add(hash);
+
         const existing = await tx.dictionary.findUnique({ where: { chineseHash: hash } });
-        const entry = await tx.dictionary.upsert({
+
+        if (!existing) {
+          const entry = await tx.dictionary.create({
+            data: {
+              chineseText,
+              chineseHash: hash,
+              normalizedChinese: normalizeText(chineseText),
+              englishText,
+              normalizedEnglish: normalizeText(englishText),
+              usageCount: 1,
+            },
+          });
+          await tx.dictionaryRevision.create({
+            data: {
+              dictionaryId: entry.id,
+              previousEnglish: null,
+              nextEnglish: englishText,
+              reason: "task save",
+              changedById: body.changedById ?? null,
+            },
+          });
+          created++;
+          continue;
+        }
+
+        if (sameNormalizedText(existing.englishText, englishText)) {
+          skipped++;
+          continue;
+        }
+
+        const entry = await tx.dictionary.update({
           where: { chineseHash: hash },
-          update: {
-            englishText,
-            normalizedEnglish: normalizeText(englishText),
-            usageCount: { increment: 1 },
-          },
-          create: {
+          data: {
             chineseText,
-            chineseHash: hash,
             normalizedChinese: normalizeText(chineseText),
             englishText,
             normalizedEnglish: normalizeText(englishText),
-            usageCount: 1,
+            usageCount: { increment: 1 },
           },
         });
 
@@ -71,8 +105,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
             changedById: body.changedById ?? null,
           },
         });
-
-        existing ? updated++ : created++;
+        updated++;
       }
 
       await tx.dictionaryConflict.updateMany({
@@ -80,28 +113,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
         data: { resolvedAt: new Date(), resolution: "UPDATE_DICTIONARY" },
       });
 
-      const savedSnapshot = await tx.taskSnapshot.create({
-        data: {
-          taskId,
-          version: snapshotVersion + 1,
-          kind: SnapshotKind.SAVED,
-          standardDocuments: snapshot.standardDocuments ?? {},
-          previewRows: rows as unknown as Prisma.InputJsonValue,
-          conflictSummary: (snapshot.conflictSummary ?? {}) as Prisma.InputJsonValue,
-        },
-      });
-
       const task = await tx.translationTask.update({
         where: { id: taskId },
-        data: {
-          status: TaskStatus.SAVED,
-          isEditable: false,
-          latestVersion: snapshotVersion + 1,
-          savedAt: new Date(),
-        },
+        data: { dictionarySyncedAt: new Date() },
       });
 
-      return { task, snapshot: savedSnapshot };
+      return { task, snapshot };
     });
 
     return ok({

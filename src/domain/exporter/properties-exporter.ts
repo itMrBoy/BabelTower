@@ -40,6 +40,37 @@ function escapeValue(value: string): string {
   return result;
 }
 
+function exportWithTemplate(
+  document: StandardI18nDocument,
+  dictionaryPriority: boolean,
+) {
+  const template = document.metadata?.propertiesTemplate;
+  if (typeof template !== 'string') return null;
+
+  const replacements: Array<{ start: number; end: number; value: string }> = [];
+  for (const entry of document.entries) {
+    if (entry.status === 'UNSUPPORTED_VALUE' && entry.sourceValue === null) continue;
+
+    const value = dictionaryPriority && entry.translatedValue !== null
+      ? entry.translatedValue
+      : entry.sourceValue;
+    if (value === null) continue;
+
+    const start = Number(entry.metadata?.propertiesValueStart);
+    const end = Number(entry.metadata?.propertiesValueEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    replacements.push({ start, end, value: escapeValue(value) });
+  }
+
+  if (replacements.length === 0) return null;
+
+  let output = template;
+  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+    output = output.slice(0, replacement.start) + replacement.value + output.slice(replacement.end);
+  }
+  return output.endsWith('\n') ? output : output + '\n';
+}
+
 /**
  * Serialize a StandardI18nDocument back to .properties format.
  *
@@ -54,6 +85,9 @@ export function exportToProperties(
   options: PropertiesExportOptions = {},
 ): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+  const templated = exportWithTemplate(document, opts.dictionaryPriority);
+  if (templated !== null) return templated;
+
   const lines: string[] = [];
 
   for (const entry of document.entries) {

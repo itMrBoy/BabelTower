@@ -26,6 +26,30 @@ function normalizeText(text: string): string {
     .replace(/\s+/g, ' ');
 }
 
+type PreparedEntry = {
+  entry: StandardI18nEntry;
+  normChinese: string;
+  normEnglish: string;
+};
+
+function prepareEntries(entries: StandardI18nEntry[]): PreparedEntry[] {
+  const prepared: PreparedEntry[] = [];
+  for (const entry of entries) {
+    const chinese = entry.sourceValue;
+    if (chinese === null) continue;
+
+    const normChinese = normalizeText(chinese);
+    if (normChinese === '') continue;
+
+    prepared.push({
+      entry,
+      normChinese,
+      normEnglish: normalizeText(entry.translatedValue ?? ''),
+    });
+  }
+  return prepared;
+}
+
 /**
  * Detect conflicts between newly parsed entries and an existing dictionary.
  *
@@ -47,51 +71,60 @@ export function detectConflicts(
   const blocking: ConflictItem[] = [];
   const warning: ConflictItem[] = [];
   const info: ConflictItem[] = [];
+  const existingPrepared = prepareEntries(existingEntries);
+  const exactExistingByChinese = new Map<string, PreparedEntry[]>();
 
-  for (const newEntry of newEntries) {
+  for (const existing of existingPrepared) {
+    const items = exactExistingByChinese.get(existing.normChinese);
+    if (items) {
+      items.push(existing);
+    } else {
+      exactExistingByChinese.set(existing.normChinese, [existing]);
+    }
+  }
+
+  for (const incoming of prepareEntries(newEntries)) {
+    const newEntry = incoming.entry;
     const newChinese = newEntry.sourceValue;
     if (newChinese === null) continue;
 
-    const normNew = normalizeText(newChinese);
-    if (normNew === '') continue;
-
-    for (const existing of existingEntries) {
-      const existingChinese = existing.sourceValue;
-      if (existingChinese === null) continue;
-
-      const normExisting = normalizeText(existingChinese);
-      if (normExisting === '') continue;
-
-      const newEnglish = newEntry.translatedValue;
-      const existingEnglish = existing.translatedValue;
-      const normNewEng = normalizeText(newEnglish ?? '');
-      const normExistingEng = normalizeText(existingEnglish ?? '');
-      const englishDiffers = normNewEng !== normExistingEng;
+    const exactExisting = exactExistingByChinese.get(incoming.normChinese) ?? [];
+    for (const existing of exactExisting) {
+      const existingEnglish = existing.entry.translatedValue;
+      const englishDiffers = incoming.normEnglish !== existing.normEnglish;
 
       const item: ConflictItem = {
         key: newEntry.key,
         keyPath: newEntry.keyPath,
         chineseValue: newChinese,
         existingEnglish: existingEnglish ?? '',
-        newEnglish: newEnglish ?? '',
+        newEnglish: newEntry.translatedValue ?? '',
         level: 'info',
       };
 
-      if (normNew === normExisting) {
-        if (englishDiffers) {
-          item.level = 'blocking';
-          blocking.push(item);
-        } else {
-          info.push(item);
-        }
-        continue;
+      if (englishDiffers) {
+        item.level = 'blocking';
+        blocking.push(item);
+      } else {
+        info.push(item);
       }
+    }
 
-      const similarity = jaroWinkler(normNew, normExisting);
+    for (const existing of existingPrepared) {
+      if (incoming.normChinese === existing.normChinese) continue;
+
+      const existingEnglish = existing.entry.translatedValue;
+      const similarity = jaroWinkler(incoming.normChinese, existing.normChinese);
       if (similarity >= opts.similarityThreshold) {
-        item.level = 'warning';
-        item.similarity = similarity;
-        warning.push(item);
+        warning.push({
+          key: newEntry.key,
+          keyPath: newEntry.keyPath,
+          chineseValue: newChinese,
+          existingEnglish: existingEnglish ?? '',
+          newEnglish: newEntry.translatedValue ?? '',
+          level: 'warning',
+          similarity,
+        });
       }
     }
   }

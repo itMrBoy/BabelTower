@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "set DATABASE_URL=postgresql://babeltower:babeltower@127.0.0.1:65432/babeltower?schema=public&& next dev",
+    "dev:db": "docker compose up -d db && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -14,8 +15,12 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose stop db",
+    "db:ps": "docker compose ps db",
     "db:validate": "prisma validate",
     "db:studio": "prisma studio",
+    "local-store:clear": "node -e \"fetch('http://localhost:3000/api/debug/local-store',{method:'DELETE'}).then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})\"",
     "openapi:validate": "npx @redocly/cli lint openapi/babeltower.v1.yaml",
     "ci:check": "npm run typecheck && npm run test && npm run db:validate"
   },

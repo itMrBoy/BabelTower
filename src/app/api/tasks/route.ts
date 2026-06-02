@@ -11,19 +11,23 @@ import {
 } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import {
+  annotateConflictLevels,
   buildPreviewRows,
   dictionaryToStandardEntry,
   mergeTargetDocument,
   parseI18nDocument,
+  previewRowToDraftData,
   summarizeConflicts,
 } from "@/lib/standard";
 
 function toPrismaFormat(format: string | null, fileName: string): FileFormat {
-  const value = (format ?? (fileName.endsWith(".properties") ? "PROPERTIES" : "JSON")).toUpperCase();
+  const value = (format ?? (fileName.endsWith(".properties") ? "PROPERTIES" : fileName.endsWith(".ts") ? "TS" : "JSON")).toUpperCase();
+  if (value === "TS") return "TS" as FileFormat;
   return value === "PROPERTIES" ? FileFormat.PROPERTIES : FileFormat.JSON;
 }
 
 function toParserFormat(format: FileFormat) {
+  if (String(format) === "TS") return "ts";
   return format === FileFormat.PROPERTIES ? "properties" : "json";
 }
 
@@ -49,6 +53,14 @@ export async function GET(request: NextRequest) {
       where: {
         projectId,
         status: status ? (status as TaskStatus) : historyOnly ? TaskStatus.READ_ONLY_HISTORY : undefined,
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -113,12 +125,26 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const previewRows = buildPreviewRows(document);
+  const previewRowsRaw = buildPreviewRows(document);
 
   try {
-    const dictionary = await prisma.dictionary.findMany({ take: 5000 });
+    const dictionary = await prisma.dictionary.findMany({
+      take: 5000,
+      select: {
+        id: true,
+        chineseText: true,
+        englishText: true,
+      },
+    });
     const conflictSummary = detectConflicts(document.entries, dictionary.map(dictionaryToStandardEntry));
     const summary = summarizeConflicts(conflictSummary);
+    const previewRows = annotateConflictLevels(previewRowsRaw, conflictSummary);
+    const dictionaryHits: Record<string, string> = {};
+    for (const entry of dictionary) {
+      if (entry.chineseText && entry.englishText) {
+        dictionaryHits[entry.chineseText] = entry.englishText;
+      }
+    }
 
     const task = await prisma.$transaction(async (tx) => {
       const created = await tx.translationTask.create({
@@ -145,6 +171,14 @@ export async function POST(request: NextRequest) {
           previewRows: previewRows as unknown as Prisma.InputJsonValue,
           conflictSummary: summary as unknown as Prisma.InputJsonValue,
         },
+      });
+
+      await tx.taskDraftRow.createMany({
+        data: previewRows.map((row, rowIndex) => ({
+          taskId: created.id,
+          ...previewRowToDraftData(row, rowIndex),
+          keyPath: row.keyPath as unknown as Prisma.InputJsonValue,
+        })),
       });
 
       const allConflicts = [
@@ -179,20 +213,28 @@ export async function POST(request: NextRequest) {
       return { ...created, latestSnapshot: snapshot };
     });
 
-    return ok({ task, latestSnapshot: task.latestSnapshot, previewRows, conflictSummary: summary }, 201);
+    return ok({ task, latestSnapshot: task.latestSnapshot, previewRows, conflictSummary: summary, dictionaryHits }, 201);
   } catch (error) {
     if (!isDatabaseUnavailable(error)) {
       return fail("task import failed", 500, error instanceof Error ? error.message : String(error));
     }
 
     try {
-      const conflictSummary = detectConflicts(document.entries, getLocalDictionaryEntriesForConflict());
+      const localDictEntries = getLocalDictionaryEntriesForConflict();
+      const conflictSummary = detectConflicts(document.entries, localDictEntries);
       const summary = summarizeConflicts(conflictSummary);
+      const previewRows = annotateConflictLevels(previewRowsRaw, conflictSummary);
+      const dictionaryHits: Record<string, string> = {};
+      for (const entry of localDictEntries) {
+        if (entry.sourceValue && entry.translatedValue) {
+          dictionaryHits[entry.sourceValue] = entry.translatedValue;
+        }
+      }
       const { task, latestSnapshot } = createLocalImportTask({
         projectId,
         name,
         mode: mode as "SINGLE_SOURCE" | "DUAL_SOURCE",
-        format: format as "JSON" | "PROPERTIES",
+        format: format as "JSON" | "PROPERTIES" | "TS",
         sourceLocale: String(form.get("sourceLocale") ?? "zh-CN"),
         targetLocale: String(form.get("targetLocale") ?? "en-US"),
         sourceFilename: sourceFile.name,
@@ -203,7 +245,7 @@ export async function POST(request: NextRequest) {
         conflictSummary,
         summary,
       });
-      return ok({ task, latestSnapshot, previewRows, conflictSummary: summary, localFallback: true }, 201);
+      return ok({ task, latestSnapshot, previewRows, conflictSummary: summary, dictionaryHits, localFallback: true }, 201);
     } catch (localError) {
       return fail("task import failed", 500, localError instanceof Error ? localError.message : String(localError));
     }

@@ -14,6 +14,7 @@ import {
 import { detectConflicts } from '../conflict/conflict-detector';
 import { exportToJson } from '../exporter/json-exporter';
 import { exportToProperties } from '../exporter/properties-exporter';
+import { exportToTs } from '../exporter/ts-exporter';
 
 // ── Validation ──
 
@@ -200,7 +201,7 @@ export function exportDocument(
   dictionary?: StandardI18nDocument,
 ): ExportResult {
   const result: ExportResult = {};
-  const baseName = document.sourceName.replace(/\.(json|properties)$/, '');
+  const baseName = document.sourceName.replace(/\.(json|properties|ts)$/, '');
 
   if (document.sourceFormat === 'json') {
     // Source-only export
@@ -209,6 +210,14 @@ export function exportDocument(
     // Dictionary-priority export (if dictionary provided)
     if (dictionary) {
       result[`${baseName}.dictionary.${dictionary.locale}.json`] = exportToJson(document, {
+        dictionaryPriority: true,
+      });
+    }
+  } else if (document.sourceFormat === 'ts') {
+    result[document.sourceName] = exportToTs(document, { dictionaryPriority: false });
+
+    if (dictionary) {
+      result[`${baseName}.dictionary.${dictionary.locale}.ts`] = exportToTs(document, {
         dictionaryPriority: true,
       });
     }

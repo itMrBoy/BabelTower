@@ -37,6 +37,10 @@ export function parseProperties(
   const sourceName = options.sourceName ?? 'unknown.properties';
 
   const rawLines = input.split(/\r?\n/);
+  const lineStarts = [0];
+  for (let index = 0; index < input.length; index++) {
+    if (input[index] === '\n') lineStarts.push(index + 1);
+  }
   const entries: StandardI18nEntry[] = [];
   const seenKeys = new Map<string, number>(); // key → entry index
   let currentComment: string | null = null;
@@ -44,6 +48,7 @@ export function parseProperties(
   for (let i = 0; i < rawLines.length; i++) {
     const lineNumber = i + 1;
     let line = rawLines[i];
+    const originalLine = line;
 
     // ── Comment lines ──
     const trimmedLead = line.trimStart();
@@ -61,16 +66,19 @@ export function parseProperties(
     // ── Key-value line (may continue on next lines) ──
     // Handle continuation: join lines ending with backslash (not escaped)
     let fullLine = line;
+    let continued = false;
     while (
       fullLine.endsWith('\\') &&
       !fullLine.endsWith('\\\\') &&
       i + 1 < rawLines.length
     ) {
+      continued = true;
       i++;
       fullLine = fullLine.slice(0, -1) + rawLines[i];
     }
 
     // Trim leading whitespace from the full logical line
+    const trimStartOffset = fullLine.length - fullLine.trimStart().length;
     fullLine = fullLine.trimStart();
 
     // Determine delimiter position (= or :)
@@ -78,7 +86,8 @@ export function parseProperties(
     if (eqIdx === -1) continue; // malformed line, skip
 
     let rawKey = fullLine.slice(0, eqIdx).trimEnd();
-    let rawValue = fullLine.slice(eqIdx + 1).trim();
+    const rawValueWithWhitespace = fullLine.slice(eqIdx + 1);
+    let rawValue = rawValueWithWhitespace.trim();
 
     // Unescape Unicode in key and value
     const key = unescapeUnicode(rawKey);
@@ -93,6 +102,17 @@ export function parseProperties(
     let status: 'NORMAL' | 'DUPLICATED_KEY' = 'NORMAL';
 
     const location: SourceLocation = { line: lineNumber, column: 1 };
+    const metadata: Record<string, string> = currentComment ? { comment: currentComment } : {};
+    if (!continued) {
+      const valueLeadingWhitespace = rawValueWithWhitespace.length - rawValueWithWhitespace.trimStart().length;
+      const valueTrailingWhitespace = rawValueWithWhitespace.length - rawValueWithWhitespace.trimEnd().length;
+      const valueStart = lineStarts[lineNumber - 1] + trimStartOffset + eqIdx + 1 + valueLeadingWhitespace;
+      const valueEnd = lineStarts[lineNumber - 1] + trimStartOffset + eqIdx + 1 + rawValueWithWhitespace.length - valueTrailingWhitespace;
+      if (valueStart <= valueEnd && valueEnd <= lineStarts[lineNumber - 1] + originalLine.length) {
+        metadata.propertiesValueStart = String(valueStart);
+        metadata.propertiesValueEnd = String(valueEnd);
+      }
+    }
 
     if (existingIdx !== undefined) {
       status = 'DUPLICATED_KEY';
@@ -104,6 +124,13 @@ export function parseProperties(
       if (currentComment) {
         existing.metadata = { ...existing.metadata, comment: currentComment };
       }
+      if (metadata.propertiesValueStart && metadata.propertiesValueEnd) {
+        existing.metadata = {
+          ...existing.metadata,
+          propertiesValueStart: metadata.propertiesValueStart,
+          propertiesValueEnd: metadata.propertiesValueEnd,
+        };
+      }
     }
 
     entries.push({
@@ -114,7 +141,7 @@ export function parseProperties(
       locale,
       status,
       sourceLocation: location,
-      metadata: currentComment ? { comment: currentComment } : undefined,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     });
 
     if (existingIdx === undefined) {
@@ -130,6 +157,7 @@ export function parseProperties(
     locale,
     sourceFormat: 'properties' as SourceFormat,
     sourceName,
+    metadata: { propertiesTemplate: input },
   };
 }
 

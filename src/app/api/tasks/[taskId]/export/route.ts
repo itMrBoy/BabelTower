@@ -1,12 +1,17 @@
 import { NextRequest } from "next/server";
-import { exportToJson } from "@/domain/exporter/json-exporter";
-import { exportToProperties } from "@/domain/exporter/properties-exporter";
+import { buildDualExportFiles } from "@/domain/exporter/export-files";
 import { validateDocument } from "@/domain/persistence/save-service";
 import type { PreviewRow, StandardI18nDocument } from "@/domain/standard-i18n/types";
 import { fail, ok } from "@/lib/api";
-import { getLocalSnapshot, isDatabaseUnavailable } from "@/lib/local-store";
+import { getLocalSnapshot, getLocalTask, isDatabaseUnavailable } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
-import { rowsToDocument } from "@/lib/standard";
+import { draftRowsToPreviewRows, rowsToDocument } from "@/lib/standard";
+
+function validateTranslatedRows(rows: PreviewRow[]) {
+  return rows
+    .filter((row) => !row.translatedValue?.trim())
+    .map((row) => ({ field: `entries.${row.key}.translatedValue`, message: "translatedValue is required for target export" }));
+}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
   const { taskId } = await context.params;
@@ -17,27 +22,29 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
   try {
     const snapshot = await prisma.taskSnapshot.findUnique({
       where: { taskId_version: { taskId, version: snapshotVersion } },
+      include: { task: { select: { targetFilename: true } } },
     });
     if (!snapshot) return fail("snapshot not found", 404);
 
     const docs = snapshot.standardDocuments as { source?: StandardI18nDocument } | null;
-    const rows = snapshot.previewRows as unknown as PreviewRow[];
+    const draftRows = await prisma.taskDraftRow.findMany({ where: { taskId }, orderBy: { rowIndex: "asc" } });
+    const rows = draftRows.length > 0 ? draftRowsToPreviewRows(draftRows) : (snapshot.previewRows as unknown as PreviewRow[]);
     if (!docs?.source) return fail("source document missing", 422);
 
     const document = rowsToDocument(rows, docs.source);
     const validation = validateDocument(document);
     if (!validation.valid) return ok({ valid: false, validationErrors: validation.errors }, 422);
+    const translatedErrors = validateTranslatedRows(rows);
+    if (translatedErrors.length > 0) return ok({ valid: false, validationErrors: translatedErrors }, 422);
 
-    const content = document.sourceFormat === "properties"
-      ? exportToProperties(document, { dictionaryPriority: true })
-      : exportToJson(document, { dictionaryPriority: true });
-    const files = { [document.sourceName]: content };
-    return ok({ files, fileBaseName: body.fileBaseName ?? document.sourceName });
+    const result = buildDualExportFiles(document, snapshot.task.targetFilename);
+    return ok({ files: result.files, fileBaseName: body.fileBaseName ?? result.sourceFilename });
   } catch (error) {
     if (!isDatabaseUnavailable(error)) {
       return fail("task export failed", 500, error instanceof Error ? error.message : String(error));
     }
     const snapshot = getLocalSnapshot(taskId, snapshotVersion);
+    const task = getLocalTask(taskId);
     if (!snapshot) return fail("snapshot not found", 404);
     const docs = snapshot.standardDocuments;
     const rows = snapshot.previewRows;
@@ -46,11 +53,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     const document = rowsToDocument(rows, docs.source);
     const validation = validateDocument(document);
     if (!validation.valid) return ok({ valid: false, validationErrors: validation.errors, localFallback: true }, 422);
+    const translatedErrors = validateTranslatedRows(rows);
+    if (translatedErrors.length > 0) {
+      return ok({ valid: false, validationErrors: translatedErrors, localFallback: true }, 422);
+    }
 
-    const content = document.sourceFormat === "properties"
-      ? exportToProperties(document, { dictionaryPriority: true })
-      : exportToJson(document, { dictionaryPriority: true });
-    const files = { [document.sourceName]: content };
-    return ok({ files, fileBaseName: body.fileBaseName ?? document.sourceName, localFallback: true });
+    const result = buildDualExportFiles(document, task?.targetFilename);
+    return ok({ files: result.files, fileBaseName: body.fileBaseName ?? result.sourceFilename, localFallback: true });
   }
 }

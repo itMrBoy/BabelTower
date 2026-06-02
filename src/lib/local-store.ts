@@ -5,7 +5,14 @@ import type {
   PreviewRow,
   StandardI18nDocument,
 } from "@/domain/standard-i18n/types";
-import { chineseHash, dictionaryToStandardEntry, normalizeText } from "@/lib/standard";
+import {
+  chineseHash,
+  dictionaryToStandardEntry,
+  draftRowsToPreviewRows,
+  normalizeText,
+  previewRowToDraftData,
+  type PreviewRowPatch,
+} from "@/lib/standard";
 
 export type ConflictSummaryCounts = {
   blocking: number;
@@ -30,7 +37,7 @@ type LocalTask = {
   projectId: string;
   name: string;
   mode: "SINGLE_SOURCE" | "DUAL_SOURCE";
-  format: "JSON" | "PROPERTIES";
+  format: "JSON" | "PROPERTIES" | "TS";
   sourceLocale: string;
   targetLocale: string;
   status: "DRAFT" | "SAVED" | "READ_ONLY_HISTORY" | "CANCELLED";
@@ -40,6 +47,7 @@ type LocalTask = {
   targetFilename: string | null;
   createdById: string | null;
   savedAt: Date | null;
+  dictionarySyncedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -96,10 +104,26 @@ type LocalConflict = {
   createdAt: Date;
 };
 
+type LocalDraftRow = {
+  id: string;
+  taskId: string;
+  rowKey: string;
+  rowIndex: number;
+  keyPath: string[];
+  sourceValue: string | null;
+  translatedValue: string | null;
+  status: string;
+  conflictLevel?: "blocking" | "warning" | "info" | null;
+  metadata?: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type LocalStore = {
   projects: LocalProject[];
   tasks: LocalTask[];
   snapshots: LocalSnapshot[];
+  draftRows: LocalDraftRow[];
   dictionaries: LocalDictionary[];
   conflicts: LocalConflict[];
 };
@@ -114,6 +138,7 @@ function store() {
       projects: [],
       tasks: [],
       snapshots: [],
+      draftRows: [],
       dictionaries: [],
       conflicts: [],
     };
@@ -156,6 +181,10 @@ export function listLocalProjects(q: string | undefined, limit: number) {
   return sortByUpdatedAt(items).slice(0, limit);
 }
 
+export function findLocalProjectByName(name: string) {
+  return store().projects.find((project) => project.name.toLowerCase() === name.toLowerCase()) ?? null;
+}
+
 export function createLocalProject(data: {
   code: string;
   name: string;
@@ -163,9 +192,8 @@ export function createLocalProject(data: {
   createdById?: string | null;
 }) {
   const state = store();
-  const existing = state.projects.find((project) => project.code === data.code);
+  const existing = state.projects.find((project) => project.name.toLowerCase() === data.name.toLowerCase());
   if (existing) {
-    existing.name = data.name;
     existing.description = data.description ?? existing.description;
     existing.updatedAt = now();
     return existing;
@@ -185,6 +213,29 @@ export function createLocalProject(data: {
   return project;
 }
 
+export function updateLocalProject(projectId: string, data: { name: string; description?: string | null }) {
+  const state = store();
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return null;
+  project.name = data.name;
+  project.description = data.description ?? project.description;
+  project.updatedAt = now();
+  return project;
+}
+
+export function deleteLocalProject(projectId: string) {
+  const state = store();
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return null;
+  const taskIds = new Set(state.tasks.filter((task) => task.projectId === projectId).map((task) => task.id));
+  state.projects = state.projects.filter((item) => item.id !== projectId);
+  state.tasks = state.tasks.filter((task) => task.projectId !== projectId);
+  state.snapshots = state.snapshots.filter((snapshot) => !taskIds.has(snapshot.taskId));
+  state.draftRows = state.draftRows.filter((row) => !taskIds.has(row.taskId));
+  state.conflicts = state.conflicts.filter((conflict) => !conflict.taskId || !taskIds.has(conflict.taskId));
+  return project;
+}
+
 export function listLocalTasks(args: {
   projectId?: string;
   status?: string;
@@ -196,7 +247,13 @@ export function listLocalTasks(args: {
     if (!args.status && args.historyOnly && task.status !== "READ_ONLY_HISTORY") return false;
     return true;
   });
-  return sortByUpdatedAt(items);
+  return sortByUpdatedAt(items).map((task) => {
+    const project = store().projects.find((item) => item.id === task.projectId);
+    return {
+      ...task,
+      project: project ? { id: project.id, name: project.name } : null,
+    };
+  });
 }
 
 function localDictionaryEntries() {
@@ -248,7 +305,7 @@ export function createLocalImportTask(args: {
   projectId: string;
   name: string;
   mode: "SINGLE_SOURCE" | "DUAL_SOURCE";
-  format: "JSON" | "PROPERTIES";
+  format: "JSON" | "PROPERTIES" | "TS";
   sourceLocale: string;
   targetLocale: string;
   sourceFilename: string;
@@ -278,6 +335,7 @@ export function createLocalImportTask(args: {
     targetFilename: args.targetFilename ?? null,
     createdById: null,
     savedAt: null,
+    dictionarySyncedAt: null,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -296,6 +354,15 @@ export function createLocalImportTask(args: {
 
   state.tasks.unshift(task);
   state.snapshots.unshift(snapshot);
+  state.draftRows.push(
+    ...args.previewRows.map((row, rowIndex) => ({
+      id: randomUUID(),
+      taskId: task.id,
+      ...previewRowToDraftData(row, rowIndex),
+      createdAt: now(),
+      updatedAt: now(),
+    })),
+  );
   state.conflicts.push(...toConflictRows(task.id, snapshot.id, args.conflictSummary));
   project.currentTaskId = task.id;
   project.updatedAt = now();
@@ -325,15 +392,92 @@ export function getLocalSnapshot(taskId: string, version: number) {
   );
 }
 
+export function listLocalDraftRows(taskId: string) {
+  return store().draftRows
+    .filter((row) => row.taskId === taskId)
+    .sort((a, b) => a.rowIndex - b.rowIndex);
+}
+
+export function getLocalCurrentRows(taskId: string) {
+  const draftRows = listLocalDraftRows(taskId);
+  if (draftRows.length > 0) return draftRowsToPreviewRows(draftRows);
+  return getLatestLocalSnapshot(taskId)?.previewRows ?? [];
+}
+
+export function initializeLocalDraftRowsFromSnapshot(taskId: string) {
+  const state = store();
+  if (state.draftRows.some((row) => row.taskId === taskId)) return listLocalDraftRows(taskId);
+  const snapshot = getLatestLocalSnapshot(taskId);
+  if (!snapshot) return [];
+  state.draftRows.push(
+    ...snapshot.previewRows.map((row, rowIndex) => ({
+      id: randomUUID(),
+      taskId,
+      ...previewRowToDraftData(row, rowIndex),
+      createdAt: now(),
+      updatedAt: now(),
+    })),
+  );
+  return listLocalDraftRows(taskId);
+}
+
+export function upsertLocalDraftRows(taskId: string, rows: PreviewRowPatch[]) {
+  const state = store();
+  const task = getLocalTask(taskId);
+  if (!task) throw new Error("task not found");
+  if (task.status !== "DRAFT" || !task.isEditable) {
+    throw new Error("task is not draft editable");
+  }
+
+  for (const patch of rows) {
+    const rowKey = (patch.rowKey ?? patch.key ?? "").trim();
+    if (!rowKey) continue;
+    const existing = state.draftRows.find((row) => row.taskId === taskId && row.rowKey === rowKey);
+    if (existing) {
+      if (typeof patch.rowIndex === "number") existing.rowIndex = patch.rowIndex;
+      if (Array.isArray(patch.keyPath)) existing.keyPath = patch.keyPath;
+      if ("sourceValue" in patch) existing.sourceValue = patch.sourceValue ?? null;
+      if ("translatedValue" in patch) existing.translatedValue = patch.translatedValue ?? null;
+      if (typeof patch.status === "string") existing.status = patch.status;
+      if ("conflictLevel" in patch) existing.conflictLevel = patch.conflictLevel ?? null;
+      existing.updatedAt = now();
+    } else {
+      state.draftRows.push({
+        id: randomUUID(),
+        taskId,
+        rowKey,
+        rowIndex: patch.rowIndex ?? state.draftRows.filter((row) => row.taskId === taskId).length,
+        keyPath: patch.keyPath ?? [rowKey],
+        sourceValue: patch.sourceValue ?? null,
+        translatedValue: patch.translatedValue ?? null,
+        status: patch.status ?? "NORMAL",
+        conflictLevel: patch.conflictLevel ?? null,
+        createdAt: now(),
+        updatedAt: now(),
+      });
+    }
+  }
+  task.updatedAt = now();
+  return listLocalDraftRows(taskId);
+}
+
+export function deleteLocalDraftRows(taskId: string) {
+  const state = store();
+  state.draftRows = state.draftRows.filter((row) => row.taskId !== taskId);
+}
+
 export function createLocalSnapshot(args: {
   taskId: string;
   baseVersion: number;
-  rows: PreviewRow[];
-  kind: "AUTOSAVED" | "MANUAL_DRAFT";
+  rows?: PreviewRow[];
+  kind: "AUTOSAVED" | "MANUAL_DRAFT" | "SAVED";
 }) {
   const state = store();
   const task = state.tasks.find((item) => item.id === args.taskId);
   if (!task) throw new Error("task not found");
+  if (task.status !== "DRAFT" || !task.isEditable) {
+    throw new Error("task is not draft editable");
+  }
   if (task.latestVersion !== args.baseVersion) {
     const error = new Error("snapshot version conflict");
     (error as Error & { expected?: number; actual?: number }).expected = task.latestVersion;
@@ -348,14 +492,71 @@ export function createLocalSnapshot(args: {
     version: args.baseVersion + 1,
     kind: args.kind,
     standardDocuments: latest?.standardDocuments ?? {},
-    previewRows: args.rows,
+    previewRows: args.rows ?? getLocalCurrentRows(args.taskId),
     conflictSummary: latest?.conflictSummary ?? { blocking: 0, warning: 0, info: 0, hasBlocking: false },
     createdById: null,
     createdAt: now(),
   };
   task.latestVersion = snapshot.version;
+  if (args.kind === "SAVED") {
+    task.status = "SAVED";
+    task.isEditable = false;
+    task.savedAt = now();
+    deleteLocalDraftRows(args.taskId);
+  }
   task.updatedAt = now();
   state.snapshots.unshift(snapshot);
+  return { snapshot, task };
+}
+
+export function resolveLocalConflicts(
+  taskId: string,
+  resolutions: { key: string; resolution: string }[],
+) {
+  const allowed: LocalConflict["resolution"][] = [
+    "KEEP_EXISTING",
+    "UPDATE_DICTIONARY",
+    "IGNORE_SIMILAR",
+    "EDIT_ROW",
+  ];
+  const resolvedAt = now();
+  for (const item of resolutions) {
+    const resolution = allowed.includes(item.resolution as LocalConflict["resolution"])
+      ? (item.resolution as LocalConflict["resolution"])
+      : "EDIT_ROW";
+    for (const conflict of store().conflicts) {
+      if (
+        conflict.taskId === taskId &&
+        conflict.candidateKey === item.key &&
+        conflict.resolvedAt === null
+      ) {
+        conflict.resolvedAt = resolvedAt;
+        conflict.resolution = resolution;
+      }
+    }
+  }
+}
+
+export function summarizeLocalConflictCounts(taskId: string): ConflictSummaryCounts {
+  const unresolved = store().conflicts.filter(
+    (conflict) => conflict.taskId === taskId && conflict.resolvedAt === null,
+  );
+  const blocking = unresolved.filter((conflict) => conflict.severity === "BLOCKING").length;
+  const warning = unresolved.filter((conflict) => conflict.severity === "WARNING").length;
+  const info = unresolved.filter((conflict) => conflict.severity === "INFO").length;
+  return { blocking, warning, info, hasBlocking: blocking > 0 };
+}
+
+export function updateLocalSnapshotConflictSummary(
+  taskId: string,
+  version: number,
+  conflictSummary: ConflictSummaryCounts,
+) {
+  const snapshot = store().snapshots.find(
+    (item) => item.taskId === taskId && item.version === version,
+  );
+  if (!snapshot) return null;
+  snapshot.conflictSummary = conflictSummary;
   return snapshot;
 }
 
@@ -375,6 +576,13 @@ export function unresolvedBlockingConflicts(taskId: string) {
       conflict.severity === "BLOCKING" &&
       conflict.resolvedAt === null,
   );
+}
+
+export function listLocalTaskConflicts(taskId: string, unresolvedOnly = false) {
+  return store()
+    .conflicts
+    .filter((conflict) => conflict.taskId === taskId && (!unresolvedOnly || conflict.resolvedAt === null))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export function listLocalDictionaries(args: {
@@ -443,19 +651,38 @@ export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: numbe
   const snapshot = getLocalSnapshot(taskId, snapshotVersion);
   const task = getLocalTask(taskId);
   if (!task || !snapshot) throw new Error("snapshot not found");
+  const rows = snapshot.previewRows;
 
   let created = 0;
   let updated = 0;
   let skipped = 0;
-  for (const row of snapshot.previewRows) {
+  const seenHashes = new Set<string>();
+  for (const row of rows) {
     const chineseText = row.sourceValue?.trim();
     const englishText = row.translatedValue?.trim();
     if (!chineseText || !englishText) {
       skipped++;
       continue;
     }
-    const result = upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1 });
-    result.existed ? updated++ : created++;
+    const hash = chineseHash(chineseText);
+    if (seenHashes.has(hash)) {
+      skipped++;
+      continue;
+    }
+    seenHashes.add(hash);
+
+    const existing = findLocalDictionaryByChineseHash(hash);
+    if (!existing) {
+      upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1 });
+      created++;
+      continue;
+    }
+    if (normalizeText(existing.englishText) === normalizeText(englishText)) {
+      skipped++;
+      continue;
+    }
+    upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1 });
+    updated++;
   }
 
   for (const conflict of state.conflicts) {
@@ -465,23 +692,12 @@ export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: numbe
     }
   }
 
-  const savedSnapshot: LocalSnapshot = {
-    ...snapshot,
-    id: randomUUID(),
-    version: snapshotVersion + 1,
-    kind: "SAVED",
-    createdAt: now(),
-  };
-  state.snapshots.unshift(savedSnapshot);
-  task.status = "SAVED";
-  task.isEditable = false;
-  task.latestVersion = savedSnapshot.version;
-  task.savedAt = now();
+  task.dictionarySyncedAt = now();
   task.updatedAt = now();
 
   return {
     task,
-    snapshot: savedSnapshot,
+    snapshot,
     dictionarySync: { created, updated, skipped },
   };
 }
@@ -496,4 +712,16 @@ export function getLocalCurrentTask(projectId: string) {
   if (!project) return null;
   if (project.currentTaskId) return getLocalTask(project.currentTaskId);
   return sortByUpdatedAt(state.tasks.filter((task) => task.projectId === projectId && task.status === "DRAFT" && task.isEditable))[0] ?? null;
+}
+
+export function clearLocalStore() {
+  globalForStore.__babelTowerLocalStore = {
+    projects: [],
+    tasks: [],
+    snapshots: [],
+    draftRows: [],
+    dictionaries: [],
+    conflicts: [],
+  };
+  return globalForStore.__babelTowerLocalStore;
 }

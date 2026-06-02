@@ -6,13 +6,28 @@ import { prisma } from "@/lib/prisma";
 import { dictionaryToStandardEntry } from "@/lib/standard";
 import type { StandardI18nEntry } from "@/domain/standard-i18n/types";
 
+function parseLimit(value: string | null) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (Number.isNaN(parsed)) return 1000;
+  return Math.min(Math.max(parsed, 1), 5000);
+}
+
 export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const limit = parseLimit(searchParams.get("limit"));
   const body = await request.json();
   const entries = body.entries as StandardI18nEntry[] | undefined;
   if (!Array.isArray(entries)) return fail("entries array is required", 400);
 
   try {
-    const dictionary = await prisma.dictionary.findMany({ take: 5000 });
+    const dictionary = await prisma.dictionary.findMany({
+      take: limit,
+      select: {
+        id: true,
+        chineseText: true,
+        englishText: true,
+      },
+    });
     const conflictSummary = detectConflicts(entries, dictionary.map(dictionaryToStandardEntry));
     return ok({ conflictSummary });
   } catch (error) {

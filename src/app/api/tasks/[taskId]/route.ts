@@ -1,6 +1,14 @@
 import { fail, ok } from "@/lib/api";
-import { getLatestLocalSnapshot, getLocalTask, isDatabaseUnavailable } from "@/lib/local-store";
+import {
+  getLatestLocalSnapshot,
+  getLocalCurrentRows,
+  getLocalTask,
+  initializeLocalDraftRowsFromSnapshot,
+  isDatabaseUnavailable,
+} from "@/lib/local-store";
+import type { PreviewRow } from "@/domain/standard-i18n/types";
 import { prisma } from "@/lib/prisma";
+import { draftRowsToPreviewRows, previewRowToDraftData } from "@/lib/standard";
 
 export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   const { taskId } = await context.params;
@@ -11,12 +19,31 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
       where: { taskId },
       orderBy: { version: "desc" },
     });
-    return ok({ task, latestSnapshot });
+    let draftRows = await prisma.taskDraftRow.findMany({ where: { taskId }, orderBy: { rowIndex: "asc" } });
+    if (draftRows.length === 0 && task.status === "DRAFT" && task.isEditable && latestSnapshot) {
+      await prisma.taskDraftRow.createMany({
+        data: (latestSnapshot.previewRows as unknown as PreviewRow[]).map((row, rowIndex) => ({
+          taskId,
+          ...previewRowToDraftData(row, rowIndex),
+        })),
+      });
+      draftRows = await prisma.taskDraftRow.findMany({ where: { taskId }, orderBy: { rowIndex: "asc" } });
+    }
+    const previewRows = draftRows.length > 0
+      ? draftRowsToPreviewRows(draftRows)
+      : ((latestSnapshot?.previewRows ?? []) as unknown as PreviewRow[]);
+    return ok({ task, latestSnapshot, previewRows });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
       const task = getLocalTask(taskId);
       if (!task) return fail("task not found", 404);
-      return ok({ task, latestSnapshot: getLatestLocalSnapshot(taskId), localFallback: true });
+      initializeLocalDraftRowsFromSnapshot(taskId);
+      return ok({
+        task,
+        latestSnapshot: getLatestLocalSnapshot(taskId),
+        previewRows: getLocalCurrentRows(taskId),
+        localFallback: true,
+      });
     }
     return fail("task detail failed", 500, error instanceof Error ? error.message : String(error));
   }
