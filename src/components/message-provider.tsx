@@ -34,7 +34,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       setMessages((prev) => [...prev, { id, type, content }]);
       setTimeout(() => {
         remove(id);
-      }, 3000);
+      }, type === "error" || type === "warning" ? 6000 : 3000);
     },
     [remove]
   );
@@ -58,7 +58,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         {messages.map((m) => (
           <div
             key={m.id}
-            className={`pointer-events-auto px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 animate-[slideIn_0.2s_ease-out] ${
+            className={`pointer-events-auto max-w-[min(760px,calc(100vw-32px))] px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium leading-6 transition-all duration-300 animate-[slideIn_0.2s_ease-out] ${
               m.type === "success"
                 ? "bg-green-50 text-green-700 border border-green-200"
                 : m.type === "error"

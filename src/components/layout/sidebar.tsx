@@ -36,9 +36,11 @@ export default function Sidebar() {
   return (
     <aside className="w-60 bg-sidebar-bg text-sidebar-text flex flex-col flex-shrink-0">
       <div className="p-5 flex items-center gap-3 border-b border-slate-700">
-        <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
-          BT
-        </div>
+        <img
+          src="/babeltower-icon.svg"
+          alt="BabelTower"
+          className="w-9 h-9 rounded-lg bg-white object-cover"
+        />
         <span className="font-semibold text-white text-base">BabelTower</span>
       </div>
       <nav className="flex-1 py-4 space-y-1 px-3">
@@ -68,8 +70,6 @@ export default function Sidebar() {
       </nav>
       <div className="p-4 border-t border-slate-700 text-xs text-slate-500">
         BabelTower v0.1.0
-        <br />
-        赵刚 · UI Designer
       </div>
     </aside>
   );

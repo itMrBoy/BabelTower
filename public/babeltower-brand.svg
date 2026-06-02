@@ -1,0 +1,30 @@
+<svg width="360" height="430" viewBox="0 0 360 430" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="360" height="430" rx="24" fill="#fffef8"/>
+  <path d="M79 122H48C48 98 67 79 91 79C94 51 117 30 146 30C173 30 197 48 204 73C211 71 218 70 225 71C253 73 276 94 280 122H312" stroke="#050505" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M179 35L187 53L207 56L192 70L196 90L179 80L162 90L166 70L151 56L171 53L179 35Z" fill="#21d4c7" stroke="#050505" stroke-width="11" stroke-linejoin="round"/>
+  <path d="M91 301H309" stroke="#050505" stroke-width="16" stroke-linecap="round"/>
+  <path d="M62 208V160L116 136L170 160V208L116 232L62 208Z" fill="#ffc928" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M62 160L116 184L170 160" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M116 184V232" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M116 136V84L170 60L224 84V136L170 160L116 136Z" fill="#16c6bb" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M116 84L170 108L224 84" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M170 108V160" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M170 208V154L225 130L280 154V208L225 234L170 208Z" fill="#ff4f45" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M170 154L225 179L280 154" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M225 179V234" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M210 271V219L266 195L322 219V271L266 295L210 271Z" fill="#34d06e" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M210 219L266 244L322 219" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M266 244V295" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M38 282V232L93 207L148 232V282L93 306L38 282Z" fill="#18c4c7" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M38 232L93 256L148 232" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M93 256V306" stroke="#050505" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M51 179C51 151 51 151 74 132" stroke="#050505" stroke-width="11" stroke-linecap="round"/>
+  <path d="M74 132L54 135M74 132L76 153" stroke="#050505" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M304 173V126" stroke="#050505" stroke-width="11" stroke-linecap="round"/>
+  <path d="M304 126L286 146M304 126L322 146" stroke="#050505" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="70" cy="107" r="8" fill="#050505"/>
+  <circle cx="289" cy="105" r="8" fill="#050505"/>
+  <circle cx="326" cy="181" r="8" fill="#050505"/>
+  <text x="180" y="363" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="55" font-weight="900" fill="#050505">BabelTower</text>
+  <text x="180" y="402" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="800" fill="#050505">i18n &amp; l10n Dictionary</text>
+</svg>

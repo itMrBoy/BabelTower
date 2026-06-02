@@ -7,6 +7,11 @@ import { MessageProvider } from "@/components/message-provider";
 export const metadata: Metadata = {
   title: "BabelTower",
   description: "Chinese-first i18n dictionary import, conflict check, and export workflow.",
+  icons: {
+    icon: "/babeltower-icon.svg",
+    shortcut: "/babeltower-icon.svg",
+    apple: "/babeltower-icon.svg",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

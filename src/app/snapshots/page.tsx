@@ -1,11 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ChevronDownIcon,
   CheckIcon,
-  AlertTriangleIcon,
   FileXIcon,
   RefreshCwIcon,
 } from "@/components/icons";
@@ -14,6 +13,11 @@ import { useMessage } from "@/components/message-provider";
 
 interface Task {
   id: string;
+  projectId: string;
+  project?: {
+    id: string;
+    name: string;
+  } | null;
   name: string;
   status: string;
   mode: string;
@@ -23,6 +27,7 @@ interface Task {
   targetFilename: string | null;
   sourceLocale: string;
   targetLocale: string;
+  dictionarySyncedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,16 +51,33 @@ interface Snapshot {
 function statusBadge(status: string) {
   const map: Record<string, { className: string; label: string }> = {
     DRAFT: { className: "bg-amber-100 text-amber-700", label: "草稿" },
-    IN_REVIEW: { className: "bg-blue-100 text-blue-700", label: "审核中" },
     SAVED: { className: "bg-green-100 text-green-700", label: "已保存" },
     READ_ONLY_HISTORY: { className: "bg-slate-100 text-slate-600", label: "只读历史" },
-    FAILED: { className: "bg-red-100 text-red-700", label: "失败" },
+    CANCELLED: { className: "bg-red-100 text-red-700", label: "已取消" },
   };
   const config = map[status] ?? { className: "bg-slate-100 text-slate-600", label: status };
   return (
     <span className={`text-xs ${config.className} px-2 py-0.5 rounded-full font-medium`}>
       {config.label}
     </span>
+  );
+}
+
+function statusLabel(status: string) {
+  const map: Record<string, string> = {
+    DRAFT: "草稿",
+    SAVED: "已保存",
+    READ_ONLY_HISTORY: "只读历史",
+    CANCELLED: "已取消",
+  };
+  return map[status] ?? status;
+}
+
+function dictionarySyncBadge(syncedAt?: string | null) {
+  return syncedAt ? (
+    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">已同步</span>
+  ) : (
+    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-medium">未同步</span>
   );
 }
 
@@ -98,9 +120,7 @@ export default function SnapshotsPage() {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const message = useMessage();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"all" | "DRAFT" | "IN_REVIEW" | "SAVED" | "READ_ONLY_HISTORY" | "FAILED">(
-    "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [history, setHistory] = useState<Snapshot[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -124,7 +144,7 @@ export default function SnapshotsPage() {
   const loadHistory = useCallback(async (taskId: string) => {
     setLoadingHistory(true);
         try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/history`);
+      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/history?limit=50`);
       const body = await readJson<{ items?: Snapshot[]; error?: { message?: string } }>(response);
       if (!response.ok) {
         throw new Error(body.error?.message ?? `请求失败 (HTTP ${response.status})`);
@@ -159,7 +179,8 @@ export default function SnapshotsPage() {
   }, [selectedTaskId, loadHistory]);
 
   const filtered = statusFilter === "all" ? tasks : tasks.filter((task) => task.status === statusFilter);
-  const selected = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const selected = filtered.find((task) => task.id === selectedTaskId) ?? null;
+  const statusOptions = Array.from(new Set(tasks.map((task) => task.status)));
   const latestSnapshot = history[0] ?? null;
   const latestConflicts = latestSnapshot?.conflictSummary ?? null;
 
@@ -174,14 +195,14 @@ export default function SnapshotsPage() {
               <select
                 className="text-xs border border-slate-200 rounded-md px-2 h-8 bg-white text-slate-600 outline-none"
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+                onChange={(event) => setStatusFilter(event.target.value)}
               >
                 <option value="all">全部状态</option>
-                <option value="DRAFT">草稿</option>
-                <option value="IN_REVIEW">审核中</option>
-                <option value="SAVED">已保存</option>
-                <option value="READ_ONLY_HISTORY">只读历史</option>
-                <option value="FAILED">失败</option>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabel(status)}
+                  </option>
+                ))}
               </select>
               <button
                 type="button"
@@ -196,15 +217,16 @@ export default function SnapshotsPage() {
 
 
           <div className="overflow-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm snapshots-nowrap-table">
               <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
                 <tr>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">任务名</th>
-                  <th className="text-left px-5 py-3 font-medium whitespace-nowrap">源文件</th>
+                  <th className="text-left px-5 py-3 font-medium whitespace-nowrap">项目名称</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">格式</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">模式</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">语言对</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">状态</th>
+                  <th className="text-left px-5 py-3 font-medium whitespace-nowrap">字典</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">最新版本</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">更新时间</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">操作</th>
@@ -213,7 +235,7 @@ export default function SnapshotsPage() {
               <tbody className="divide-y divide-slate-100">
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-5 py-12 text-center text-sm text-slate-400">
+                    <td colSpan={10} className="px-5 py-12 text-center text-sm text-slate-400">
                       {loadingTasks ? "正在从 /api/tasks 加载…" : "暂无任务，请先在首页导入文件。"}
                     </td>
                   </tr>
@@ -225,19 +247,22 @@ export default function SnapshotsPage() {
                       selectedTaskId === task.id ? "bg-blue-50/50" : ""
                     }`}
                     onClick={() => {
-                      setSelectedTaskId(task.id === selectedTaskId ? null : task.id);
-                      writeCurrentTask({
-                        id: task.id,
-                        name: task.name,
-                        format: task.format,
-                        status: task.status,
-                        latestVersion: task.latestVersion,
-                      });
+                      const shouldCollapse = task.id === selectedTaskId;
+                      setSelectedTaskId(shouldCollapse ? null : task.id);
+                      if (!shouldCollapse) {
+                        writeCurrentTask({
+                          id: task.id,
+                          name: task.name,
+                          format: task.format,
+                          status: task.status,
+                          latestVersion: task.latestVersion,
+                        });
+                      }
                     }}
                   >
                     <td className="px-5 py-3 font-medium text-slate-800">{task.name}</td>
-                    <td className="px-5 py-3 font-mono text-xs text-slate-600 break-all">
-                      {task.sourceFilename ?? "—"}
+                    <td className="px-5 py-3 text-xs text-slate-600 whitespace-nowrap">
+                      {task.project?.name ?? "—"}
                     </td>
                     <td className="px-5 py-3 text-xs text-slate-600">{task.format}</td>
                     <td className="px-5 py-3 text-xs text-slate-600">
@@ -247,26 +272,35 @@ export default function SnapshotsPage() {
                       {task.sourceLocale} → {task.targetLocale}
                     </td>
                     <td className="px-5 py-3">{statusBadge(task.status)}</td>
+                    <td className="px-5 py-3">{dictionarySyncBadge(task.dictionarySyncedAt)}</td>
                     <td className="px-5 py-3 text-slate-600 text-xs">v{task.latestVersion}</td>
-                    <td className="px-5 py-3 text-slate-400 text-xs">{formatTime(task.updatedAt)}</td>
+                    <td className="px-5 py-3 text-slate-400 text-xs whitespace-nowrap">{formatTime(task.updatedAt)}</td>
                     <td className="px-5 py-3">
                       <div className="flex gap-2.5">
                         <button
                           type="button"
                           className="text-xs text-brand-500 hover:underline inline-flex items-center gap-1"
+                          aria-expanded={selectedTaskId === task.id}
                           onClick={(event) => {
                             event.stopPropagation();
-                            setSelectedTaskId(task.id);
-                            writeCurrentTask({
-                              id: task.id,
-                              name: task.name,
-                              format: task.format,
-                              status: task.status,
-                              latestVersion: task.latestVersion,
-                            });
+                            const shouldCollapse = task.id === selectedTaskId;
+                            setSelectedTaskId(shouldCollapse ? null : task.id);
+                            if (!shouldCollapse) {
+                              writeCurrentTask({
+                                id: task.id,
+                                name: task.name,
+                                format: task.format,
+                                status: task.status,
+                                latestVersion: task.latestVersion,
+                              });
+                            }
                           }}
                         >
-                          查看快照 <ChevronDownIcon size={12} />
+                          {selectedTaskId === task.id ? "收起快照" : "查看快照"}
+                          <ChevronDownIcon
+                            size={12}
+                            className={`transition-transform ${selectedTaskId === task.id ? "rotate-180" : ""}`}
+                          />
                         </button>
                       </div>
                     </td>
@@ -285,12 +319,6 @@ export default function SnapshotsPage() {
                 快照历史 · {selected.name} <span className="text-slate-400 font-normal">(最新 v{selected.latestVersion})</span>
               </h3>
               <div className="flex items-center gap-2">
-                <Link
-                  href="/conflicts"
-                  className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-md font-medium hover:bg-amber-600 inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
-                >
-                  <AlertTriangleIcon size={14} /> 处理冲突
-                </Link>
                 <Link
                   href="/export"
                   className="text-xs bg-brand-500 text-white px-3 py-1.5 rounded-md font-medium hover:bg-brand-600 inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
@@ -327,6 +355,10 @@ export default function SnapshotsPage() {
                     <span>状态</span>
                     <span>{statusBadge(selected.status)}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span>字典库</span>
+                    <span>{dictionarySyncBadge(selected.dictionarySyncedAt)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -335,13 +367,13 @@ export default function SnapshotsPage() {
                 {latestConflicts ? (
                   <div className="space-y-1 text-xs text-slate-600">
                     <div className="flex justify-between">
-                      <span>Blocking (exact_zh_diff_target)</span>
+                      <span>阻断（同中文不同英文）</span>
                       <span className={`font-medium ${(latestConflicts.blocking ?? 0) > 0 ? "text-red-600" : "text-green-600"}`}>
                         {latestConflicts.blocking ?? 0}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Warning (high_similarity)</span>
+                      <span>警告（高相似度）</span>
                       <span className={`font-medium ${(latestConflicts.warning ?? 0) > 0 ? "text-amber-600" : "text-green-600"}`}>
                         {latestConflicts.warning ?? 0}
                       </span>
@@ -365,7 +397,7 @@ export default function SnapshotsPage() {
               )}
               {history.length > 0 && (
                 <div className="overflow-auto border border-slate-100 rounded-md">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm snapshots-nowrap-table">
                     <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
                       <tr>
                         <th className="text-left px-4 py-2 font-medium whitespace-nowrap">版本</th>
@@ -380,20 +412,18 @@ export default function SnapshotsPage() {
                       {history.map((snap) => {
                         const summary = snap.conflictSummary ?? {};
                         return (
-                          <Fragment key={snap.id}>
-                            <tr className="hover:bg-slate-50">
-                              <td className="px-4 py-2 font-mono text-xs text-brand-600">v{snap.version}</td>
-                              <td className="px-4 py-2 text-xs text-slate-600">{snapshotKindLabel(snap.kind)}</td>
-                              <td className={`px-4 py-2 text-xs ${(summary.blocking ?? 0) > 0 ? "text-red-600 font-medium" : "text-slate-500"}`}>
-                                {summary.blocking ?? 0}
-                              </td>
-                              <td className={`px-4 py-2 text-xs ${(summary.warning ?? 0) > 0 ? "text-amber-600 font-medium" : "text-slate-500"}`}>
-                                {summary.warning ?? 0}
-                              </td>
-                              <td className="px-4 py-2 text-xs text-slate-500">{summary.info ?? 0}</td>
-                              <td className="px-4 py-2 text-xs text-slate-400">{formatTime(snap.createdAt)}</td>
-                            </tr>
-                          </Fragment>
+                          <tr className="hover:bg-slate-50" key={snap.id}>
+                            <td className="px-4 py-2 font-mono text-xs text-brand-600">v{snap.version}</td>
+                            <td className="px-4 py-2 text-xs text-slate-600">{snapshotKindLabel(snap.kind)}</td>
+                            <td className={`px-4 py-2 text-xs ${(summary.blocking ?? 0) > 0 ? "text-red-600 font-medium" : "text-slate-500"}`}>
+                              {summary.blocking ?? 0}
+                            </td>
+                            <td className={`px-4 py-2 text-xs ${(summary.warning ?? 0) > 0 ? "text-amber-600 font-medium" : "text-slate-500"}`}>
+                              {summary.warning ?? 0}
+                            </td>
+                            <td className="px-4 py-2 text-xs text-slate-500">{summary.info ?? 0}</td>
+                            <td className="px-4 py-2 text-xs text-slate-400 whitespace-nowrap">{formatTime(snap.createdAt)}</td>
+                          </tr>
                         );
                       })}
                     </tbody>

@@ -4,13 +4,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DownloadIcon, CheckIcon, AlertTriangleIcon } from "@/components/icons";
 import { readCurrentTask, subscribeCurrentTask, type CurrentTask } from "@/lib/current-task";
+import {
+  exportValidationMessage,
+  summarizeExportValidationErrors,
+} from "@/lib/export-validation";
 import { useMessage } from "@/components/message-provider";
 
-type ExportFormat = "JSON" | "PROPERTIES";
+type ExportFormat = "JSON" | "PROPERTIES" | "TS";
 
 const FORMAT_META: Record<ExportFormat, { label: string; description: string; extension: string }> = {
   JSON: { label: "JSON", description: "嵌套 i18n 文件", extension: ".json" },
   PROPERTIES: { label: ".properties", description: "Java / 后端格式", extension: ".properties" },
+  TS: { label: "TS", description: "export default 对象", extension: ".ts" },
 };
 
 interface ValidationError {
@@ -27,13 +32,13 @@ interface ExportResponse {
 }
 
 function pickFormat(format: string): ExportFormat {
+  if (format.toUpperCase() === "TS") return "TS";
   return format.toUpperCase() === "PROPERTIES" ? "PROPERTIES" : "JSON";
 }
 
 export default function ExportPage() {
   const [currentTask, setCurrentTask] = useState<CurrentTask | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [files, setFiles] = useState<Record<string, string>>({});
   const message = useMessage();
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [lastExportedAt, setLastExportedAt] = useState<Date | null>(null);
@@ -62,33 +67,34 @@ export default function ExportPage() {
       const body = (text ? JSON.parse(text) : {}) as ExportResponse;
       if (response.status === 422 && body.validationErrors) {
         setValidationErrors(body.validationErrors);
-        setFiles({});
-        message.error("校验未通过，请先回到首页修正错误后再导出。");
+        message.error(summarizeExportValidationErrors(body.validationErrors));
         return;
       }
       if (!response.ok) {
         throw new Error(body.error?.message ?? `请求失败 (HTTP ${response.status})`);
       }
-      setFiles(body.files ?? {});
+      downloadFiles(body.files ?? {});
       setLastExportedAt(new Date());
+      message.success(`已下载源文件和译文文件，共 ${Object.keys(body.files ?? {}).length} 个文件。`);
     } catch (err) {
-      setFiles({});
       message.error(err instanceof Error ? err.message : String(err));
     } finally {
       setExporting(false);
     }
   };
 
-  const downloadFile = (filename: string, content: string) => {
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  const downloadFiles = (nextFiles: Record<string, string>) => {
+    for (const [filename, content] of Object.entries(nextFiles)) {
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
   };
 
   return (
@@ -128,7 +134,7 @@ export default function ExportPage() {
           <div>
             <h3 className="font-semibold text-sm text-slate-700">导出格式</h3>
             <p className="text-xs text-slate-500 mt-1">
-              当前 MVP 仅支持 JSON 与 .properties，导出格式与任务源格式保持一致 (API: <code className="font-mono">/api/tasks/&#123;id&#125;/export</code>)。
+              当前 MVP 支持 JSON、TS 与 .properties，导出格式与任务源格式保持一致 (API: <code className="font-mono">/api/tasks/&#123;id&#125;/export</code>)。
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -164,10 +170,13 @@ export default function ExportPage() {
         {validationErrors.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">
             <p className="text-sm font-medium text-amber-800">导出前校验未通过：</p>
+            <p className="text-xs text-amber-700">
+              请回到首页补全对应行的中文基准或英文译文后再导出。
+            </p>
             <ul className="text-xs text-amber-700 list-disc list-inside space-y-1">
               {validationErrors.map((item, idx) => (
                 <li key={`${item.field}-${idx}`}>
-                  <span className="font-mono">{item.field}</span>: {item.message}
+                  {exportValidationMessage(item)}
                 </li>
               ))}
             </ul>
@@ -176,10 +185,10 @@ export default function ExportPage() {
 
         {/* Export button */}
         <div className="flex justify-end items-center gap-3 flex-wrap">
-          {lastExportedAt && Object.keys(files).length > 0 && (
+          {lastExportedAt && (
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-4 py-2.5 rounded-lg">
               <CheckIcon size={16} />
-              <span>已在 {lastExportedAt.toLocaleTimeString()} 生成 {Object.keys(files).length} 个文件</span>
+              <span>已在 {lastExportedAt.toLocaleTimeString()} 下载源文件和译文文件</span>
             </div>
           )}
           <button
@@ -197,35 +206,6 @@ export default function ExportPage() {
             {exporting ? "导出中..." : "生成导出文件"}
           </button>
         </div>
-
-        {/* Preview */}
-        {Object.keys(files).length > 0 && (
-          <div className="space-y-4">
-            {Object.entries(files).map(([filename, content]) => (
-              <div key={filename} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-sm text-slate-700 break-all">{filename}</h3>
-                    <p className="text-xs text-slate-500">
-                      {content.length.toLocaleString()} 字符 · 预览前 800 字符
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => downloadFile(filename, content)}
-                    className="text-xs bg-brand-500 text-white px-3 py-1.5 rounded-md font-medium hover:bg-brand-600 inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
-                  >
-                    <DownloadIcon size={14} /> 下载
-                  </button>
-                </div>
-                <pre className="bg-slate-900 text-slate-300 p-5 text-xs font-mono overflow-auto max-h-72 leading-relaxed whitespace-pre-wrap break-all">
-                  {content.slice(0, 800)}
-                  {content.length > 800 ? "\n… (内容已截断，点击下载查看完整文件)" : ""}
-                </pre>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
