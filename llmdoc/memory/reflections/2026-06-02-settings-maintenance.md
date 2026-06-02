@@ -22,5 +22,5 @@ metadata:
 
 ## 验证缺口
 
-- 当前环境依赖不完整，`npm run typecheck` 因缺少 `tsc` 失败；尝试 `npm ci` 又被 Prisma DLL 占用阻塞。
-- 后续如继续维护该区域，应在依赖恢复后补跑 `npm run typecheck` 和相关 API 测试。
+- 当前环境依赖不完整，类型检查因缺少 `tsc` 失败；不要使用 `npm ci`，应优先使用 `pnpm install --frozen-lockfile`。
+- 后续如继续维护该区域，应在依赖恢复后补跑 `pnpm typecheck` 和相关 API 测试。

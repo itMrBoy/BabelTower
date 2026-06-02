@@ -16,25 +16,25 @@ metadata:
 
 ```bash
 # 安装依赖
-npm ci
+pnpm install --frozen-lockfile
 
 # 生成 Prisma Client
-npx prisma generate
+pnpm exec prisma generate
 
 # 同步数据库 schema（开发环境）
-npx prisma db push
+pnpm exec prisma db push
 
 # 启动开发服务器
-npm run dev
+pnpm dev
 
 # 运行测试
-npm test
+pnpm test
 
 # 类型检查
-npm run typecheck
+pnpm typecheck
 
 # 完整 CI 检查
-npm run ci:check
+pnpm ci:check
 ```
 
 ## Docker 启动
@@ -44,7 +44,7 @@ npm run ci:check
 docker compose up -d --build
 
 # 同步数据库
-docker compose exec app npx prisma db push --skip-generate
+docker compose exec app pnpm exec prisma db push --skip-generate
 
 # 健康检查
 curl http://localhost:3000/api/health
