@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SearchIcon } from "@/components/icons";
 import { useMessage } from "@/components/message-provider";
 
@@ -53,9 +53,14 @@ class SearchCache {
     }
     this.cache.set(key, { items, ts: Date.now() });
   }
+
+  clear() {
+    this.cache.clear();
+  }
 }
 
 const searchCache = new SearchCache();
+const dictionaryCacheBustKey = "babeltower:dictionary-cache-bust";
 
 export default function DictionaryPage() {
   const [query, setQuery] = useState("");
@@ -65,27 +70,42 @@ export default function DictionaryPage() {
   const message = useMessage();
   const [hasSearched, setHasSearched] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const searchSeqRef = useRef(0);
+  const cacheBustRef = useRef<string | null>(null);
+
+  const clearSearchState = useCallback(() => {
+    searchSeqRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    searchCache.clear();
+    setItems([]);
+    setHasSearched(false);
+    setLoading(false);
+  }, []);
 
   const search = useCallback(
     async (q: string, f: Field) => {
       const trimmed = q.trim();
       if (!trimmed) {
-        setItems([]);
-        setHasSearched(false);
+        clearSearchState();
         return;
       }
 
+      const seq = searchSeqRef.current + 1;
+      searchSeqRef.current = seq;
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
       const cacheKey = `${trimmed}|${f}`;
       const cached = searchCache.get(cacheKey);
       if (cached) {
         setItems(cached);
         setHasSearched(true);
+        setLoading(false);
         return;
       }
 
-      if (abortRef.current) {
-        abortRef.current.abort();
-      }
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -100,32 +120,54 @@ export default function DictionaryPage() {
         }
         const result = body.items ?? [];
         searchCache.set(cacheKey, result);
+        if (seq !== searchSeqRef.current) return;
         setItems(result);
         setHasSearched(true);
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") return;
+        if (seq !== searchSeqRef.current) return;
         setItems([]);
         setHasSearched(true);
         message.error(err instanceof Error ? err.message : String(err));
       } finally {
-        setLoading(false);
+        if (seq === searchSeqRef.current) setLoading(false);
       }
     },
-    [message],
+    [clearSearchState, message],
   );
 
   // Debounce: refetch when the query/field changes after a short delay.
   useEffect(() => {
     if (!query.trim()) {
-      setItems([]);
-      setHasSearched(false);
+      clearSearchState();
       return;
     }
     const timer = window.setTimeout(() => {
       void search(query, field);
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [query, field, search]);
+  }, [query, field, search, clearSearchState]);
+
+  useEffect(() => {
+    const syncCacheBust = () => {
+      const value = window.localStorage.getItem(dictionaryCacheBustKey);
+      if (value && value !== cacheBustRef.current) {
+        cacheBustRef.current = value;
+        clearSearchState();
+      }
+    };
+    syncCacheBust();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === dictionaryCacheBustKey) syncCacheBust();
+    };
+    const onLocal = () => syncCacheBust();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("babeltower:dictionary-cache-bust", onLocal);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("babeltower:dictionary-cache-bust", onLocal);
+    };
+  }, [clearSearchState]);
 
   return (
     <div className="p-6">

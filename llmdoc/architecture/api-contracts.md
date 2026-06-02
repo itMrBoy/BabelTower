@@ -61,6 +61,12 @@ metadata:
 | POST | `/api/dictionaries` | 创建/更新条目 | `{ chineseText, englishText, tags?, note?, resolution? }` |
 | POST | `/api/dictionaries/conflicts` | 冲突检测 | `{ entries: StandardI18nEntry[] }` |
 
+### 系统配置 / 维护
+
+| 方法 | 路径 | 功能 | Body |
+|------|------|------|------|
+| POST | `/api/settings/maintenance` | 清空字典、清空快照、或同时重置快照和字典 | `{ action: "clear-dictionaries" \| "clear-snapshots" \| "reset-system" }` |
+
 ## 请求/响应数据契约
 
 ### 导入任务 (POST `/api/tasks`)
@@ -222,6 +228,33 @@ metadata:
 }
 ```
 
+### 系统维护 (POST `/api/settings/maintenance`)
+
+**请求**：
+```typescript
+{
+  action: "clear-dictionaries" | "clear-snapshots" | "reset-system"
+}
+```
+
+**行为**：
+- 优先执行数据库清理；数据库不可用时回退到 `local-store.ts` 的定向清理函数。
+- `clear-dictionaries`：删除 Dictionary；数据库模式级联删除 `DictionaryRevision`，`DictionaryConflict.dictionaryId` 按关系置空；内存模式清空 `dictionaries` 并置空本地冲突的 `dictionaryId`。
+- `clear-snapshots`：删除 `TaskSnapshot`；数据库模式按 FK 级联删除绑定快照的 `DictionaryConflict`；内存模式清空 `snapshots` 并删除绑定快照的本地冲突。
+- `reset-system`：同时执行快照和字典清理；保留项目、任务、草稿行等基础数据。
+
+**响应**：
+```typescript
+{
+  action: "clear-dictionaries" | "clear-snapshots" | "reset-system",
+  label: string,
+  storage: "database" | "memory",
+  counts: Record<string, number>,
+  localFallback?: true,
+  requestId: string
+}
+```
+
 ## 错误处理模式
 
 | 状态码 | 场景 |
@@ -276,6 +309,7 @@ try {
 | PATCH `/api/tasks/{id}/rows` | `upsertLocalDraftRows` + `resolveLocalConflicts` |
 | GET/POST `/api/dictionaries` | `listLocalDictionaries` / `upsertLocalDictionary` |
 | POST `/api/dictionaries/conflicts` | `getLocalDictionaryEntriesForConflict` |
+| POST `/api/settings/maintenance` | `clearLocalDictionaries` / `clearLocalSnapshots` / `resetLocalSnapshotsAndDictionaries` |
 
 ## OpenAPI 与实现的差异
 

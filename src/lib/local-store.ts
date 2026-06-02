@@ -725,3 +725,62 @@ export function clearLocalStore() {
   };
   return globalForStore.__babelTowerLocalStore;
 }
+
+export function clearLocalDictionaries() {
+  const state = store();
+  const counts = {
+    dictionaries: state.dictionaries.length,
+    dictionaryRevisions: 0,
+    dictionaryConflictsUpdated: state.conflicts.filter((conflict) => conflict.dictionaryId !== null).length,
+  };
+  state.dictionaries = [];
+  state.conflicts = state.conflicts.map((conflict) => ({
+    ...conflict,
+    dictionaryId: null,
+  }));
+  return counts;
+}
+
+export function clearLocalSnapshots() {
+  const state = store();
+  const snapshotIds = new Set(state.snapshots.map((snapshot) => snapshot.id));
+  const counts = {
+    snapshots: state.snapshots.length,
+    snapshotConflicts: state.conflicts.filter(
+      (conflict) => conflict.snapshotId !== null && snapshotIds.has(conflict.snapshotId),
+    ).length,
+  };
+  state.snapshots = [];
+  state.conflicts = state.conflicts.filter(
+    (conflict) => conflict.snapshotId === null || !snapshotIds.has(conflict.snapshotId),
+  );
+  return counts;
+}
+
+export function resetLocalSnapshotsAndDictionaries() {
+  const snapshotCounts = clearLocalSnapshots();
+  const dictionaryCounts = clearLocalDictionaries();
+  return {
+    ...snapshotCounts,
+    ...dictionaryCounts,
+  };
+}
+
+export function clearLocalProjects() {
+  const state = store();
+  const taskIds = new Set(state.tasks.map((task) => task.id));
+  const counts = {
+    projects: state.projects.length,
+    tasks: state.tasks.length,
+    draftRows: state.draftRows.filter((row) => taskIds.has(row.taskId)).length,
+    projectConflicts: state.conflicts.filter(
+      (conflict) => conflict.taskId !== null && taskIds.has(conflict.taskId),
+    ).length,
+  };
+  state.projects = [];
+  state.tasks = [];
+  state.draftRows = [];
+  state.snapshots = state.snapshots.filter((snapshot) => !taskIds.has(snapshot.taskId));
+  state.conflicts = state.conflicts.filter((conflict) => !conflict.taskId || !taskIds.has(conflict.taskId));
+  return counts;
+}

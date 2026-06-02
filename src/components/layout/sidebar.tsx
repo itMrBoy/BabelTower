@@ -8,6 +8,7 @@ import {
   SearchIcon,
   ClockIcon,
   DownloadIcon,
+  RefreshCwIcon,
 } from "@/components/icons";
 
 interface NavItem {
@@ -28,6 +29,7 @@ const navItems: NavItem[] = [
   { href: "/dictionary", label: "字典检索", icon: <SearchIcon size={18} /> },
   { href: "/snapshots", label: "任务快照", icon: <ClockIcon size={18} /> },
   { href: "/export", label: "导出配置", icon: <DownloadIcon size={18} /> },
+  { href: "/settings", label: "系统配置", icon: <RefreshCwIcon size={18} /> },
 ];
 
 export default function Sidebar() {

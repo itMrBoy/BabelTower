@@ -3,6 +3,12 @@ import { ConflictSeverity, ConflictType } from "@prisma/client";
 import { detectConflicts } from "@/domain/conflict/conflict-detector";
 import { fail, ok, parseLimit } from "@/lib/api";
 import {
+  clearDictionaryQueryCache,
+  dictionaryQueryCacheKey,
+  getDictionaryQueryCache,
+  setDictionaryQueryCache,
+} from "@/lib/dictionary-query-cache";
+import {
   findLocalDictionaryByChineseHash,
   getLocalDictionaryEntriesForConflict,
   isDatabaseUnavailable,
@@ -34,37 +40,6 @@ function toResponse(entry: {
   };
 }
 
-// Server-side LRU cache for dictionary search queries.
-// TTL=30s prevents stale data; max 50 entries bounds memory.
-type CacheEntry = { items: ReturnType<typeof toResponse>[]; ts: number };
-const queryCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 30_000;
-const CACHE_MAX_SIZE = 50;
-
-function cacheKey(q: string, field: string, limit: number): string {
-  return `${q}|${field}|${limit}`;
-}
-
-function getCached(key: string): ReturnType<typeof toResponse>[] | null {
-  const entry = queryCache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL_MS) {
-    queryCache.delete(key);
-    return null;
-  }
-  queryCache.delete(key);
-  queryCache.set(key, entry);
-  return entry.items;
-}
-
-function setCached(key: string, items: ReturnType<typeof toResponse>[]) {
-  if (queryCache.size >= CACHE_MAX_SIZE) {
-    const firstKey = queryCache.keys().next().value as string;
-    queryCache.delete(firstKey);
-  }
-  queryCache.set(key, { items, ts: Date.now() });
-}
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
@@ -74,8 +49,8 @@ export async function GET(request: NextRequest) {
   const limit = parseLimit(searchParams.get("limit"));
   const normalized = normalizeText(q);
 
-  const key = cacheKey(normalized, field, limit);
-  const cached = getCached(key);
+  const key = dictionaryQueryCacheKey(normalized, field, limit);
+  const cached = getDictionaryQueryCache<ReturnType<typeof toResponse>>(key);
   if (cached) {
     return ok({ items: cached });
   }
@@ -100,7 +75,7 @@ export async function GET(request: NextRequest) {
   try {
     const items = await prisma.dictionary.findMany({ where, take: limit, orderBy: { updatedAt: "desc" } });
     const responseItems = items.map(toResponse);
-    setCached(key, responseItems);
+    setDictionaryQueryCache(key, responseItems);
     return ok({ items: responseItems });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
@@ -189,6 +164,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    clearDictionaryQueryCache();
     return ok({ entry: toResponse(entry), conflictSummary }, existing ? 200 : 201);
   } catch (error) {
     if (!isDatabaseUnavailable(error)) {
@@ -240,6 +216,7 @@ export async function POST(request: NextRequest) {
       tags: Array.isArray(body.tags) ? body.tags : [],
       note: body.note ?? null,
     });
+    clearDictionaryQueryCache();
     return ok({ entry: toResponse(entry), conflictSummary, localFallback: true }, existed ? 200 : 201);
   }
 }

@@ -341,6 +341,15 @@ type LocalStore = {
 | PATCH `/api/tasks/{id}/rows` | `upsertLocalDraftRows` / `resolveLocalConflicts` |
 | GET/POST `/api/dictionaries` | `listLocalDictionaries` / `upsertLocalDictionary` |
 | POST `/api/dictionaries/conflicts` | `getLocalDictionaryEntriesForConflict` |
+| POST `/api/settings/maintenance` | `clearLocalDictionaries` / `clearLocalSnapshots` / `resetLocalSnapshotsAndDictionaries` |
+
+### 系统维护清理语义
+
+系统配置页的维护操作保留项目、任务、草稿行等基础数据，只清理快照和/或字典相关数据：
+
+- **清空字典库**：数据库模式删除 `Dictionary`，由 FK 级联删除 `DictionaryRevision`，并将 `DictionaryConflict.dictionaryId` 置空；内存模式清空 `dictionaries` 并置空本地冲突的 `dictionaryId`。
+- **清空快照**：数据库模式删除 `TaskSnapshot`，由 FK 级联删除绑定快照的 `DictionaryConflict`；内存模式清空 `snapshots` 并删除绑定快照的本地冲突。
+- **重置系统功能（快照、字典）**：组合执行快照和字典清理；不删除 `ProductProject`、`TranslationTask`、`TaskDraftRow`。
 
 ### 冲突类型映射
 
