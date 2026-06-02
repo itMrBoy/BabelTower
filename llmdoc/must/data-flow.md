@@ -44,27 +44,29 @@ metadata:
     +-- DRAFT 状态: upsert taskDraftRow (按 taskId+rowKey)
     +-- SAVED 状态: upsert dictionary + dictionaryRevision
     +-- 标记冲突已解决
-    +-- 创建 AUTOSAVED snapshot
+    +-- 重新计算冲突摘要
     |
     v
 [API] POST /api/tasks/{id}/save
     |
-    +-- 优先取 draftRows，回退到 snapshot.previewRows
-    +-- upsert dictionary (chineseHash 去重)
-    +-- 创建 dictionaryRevision 审计记录
-    +-- 标记 task status=SAVED, isEditable=false
-    +-- 创建 SAVED snapshot
+    +-- 遍历 snapshot.previewRows (使用 seenHashes 去重)
+    +-- 新条目: dictionary.create + dictionaryRevision
+    +-- 不同英文: dictionary.update + dictionaryRevision
+    +-- 相同英文: 跳过
+    +-- 更新 dictionarySyncedAt
+    +-- 不修改 task status / isEditable
     |
     v
 [API] POST /api/tasks/{id}/export
     |
     +-- rowsToDocument()  --> StandardI18nDocument
-    +-- exportToJson() / exportToProperties() / exportToTs()
+    +-- buildDualExportFiles()
     |       |
-    |       +-- dictionaryPriority: true
+    |       +-- 源文件 (dictionaryPriority: false)
+    |       +-- 翻译文件 (dictionaryPriority: true, 自动推断文件名)
     |
     v
-下载文件
+下载两个文件
 ```
 
 ## 核心模型关系

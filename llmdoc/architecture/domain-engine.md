@@ -71,7 +71,9 @@ interface StandardI18nDocument {
 3. 续行处理：行尾单个 `\`（非转义的 `\\`）表示续行，去掉 `\` 拼接下一行
 4. 分隔符查找：`findDelimiter` 查找第一个未转义的 `=` 或 `:`
 5. Unicode 转义还原：`unescapeUnicode` 将 `\uXXXX` 转为对应字符
-6. 重复 key 检测：用 `seenKeys: Map<string, number>` 记录。发现重复时新条目标记 `DUPLICATED_KEY`，同时更新已有条目的值（.properties 语义：last wins）。`seenKeys` 不更新 index，后续重复仍指向第一个条目。
+6. **模板定位**：记录每个值在原始文件中的起始和结束位置（`propertiesValueStart`/`propertiesValueEnd`），存入 `metadata`，用于后续基于原始模板的替换导出
+7. 重复 key 检测：用 `seenKeys: Map<string, number>` 记录。发现重复时新条目标记 `DUPLICATED_KEY`，同时更新已有条目的值（.properties 语义：last wins）。`seenKeys` 不更新 index，后续重复仍指向第一个条目。
+8. 原始模板保存：解析结果 `document.metadata.propertiesTemplate` 保存原始文件内容，用于模板导出
 
 ### 2.3 TS 解析器
 
@@ -170,11 +172,37 @@ JaroWinkler = Jaro + prefixLen * 0.1 * (1 - Jaro)
 
 `src/domain/exporter/properties-exporter.ts` (`exportToProperties`)
 
+**模板导出模式（优先）**：
+- 如果 `document.metadata.propertiesTemplate` 存在，使用 `exportWithTemplate`
+- 根据 `metadata.propertiesValueStart`/`propertiesValueEnd` 定位每个值在原始模板中的位置
+- 直接替换模板中对应位置的值，保留原始格式、注释、空白
+- 按 `start` 降序排序替换，避免位置偏移
+
+**逐行生成模式（回退）**：
 - `escapeValue`：转义规则 — `\` → `\\`, `\n` → `\n`, `\r` → `\r`, `\t` → `\t`, 控制字符 → `\uXXXX`
 - 跳过 `UNSUPPORTED_VALUE` 且 `sourceValue === null` 的条目
 - `dictionaryPriority` 为 true 时优先使用 `translatedValue`
 - 如果条目有 `metadata.comment`，先输出 `# comment` 行
 - 输出 `key=value` 格式（始终用 `=` 分隔符）
+
+### 4.3 TS 导出器
+
+`src/domain/exporter/ts-exporter.ts` (`exportToTs`)
+
+- 复用 JSON 导出器的 `buildNestedObject` 构建嵌套对象
+- 输出 `export default { ... }` 格式
+- `dictionaryPriority: true` 时优先使用 `translatedValue`
+
+### 4.4 双文件导出
+
+`src/domain/exporter/export-files.ts` (`buildDualExportFiles`)
+
+- 生成两个文件：**源文件**（`dictionaryPriority: false`，保留中文）和 **翻译文件**（`dictionaryPriority: true`，使用英文）
+- 翻译文件名通过 `buildTranslatedFilename` 自动推断：
+  - 替换语言标记：`zh-cn` → `en-us`，`zh` → `en`，`中文` → `英文`
+  - 如无标记，追加 `.en-US` 后缀
+  - 如上传时提供了 `targetFilename`，直接使用
+- 导出 API 返回 `{ files: { sourceFile, translatedFile } }`
 
 ## 5. 保存服务
 

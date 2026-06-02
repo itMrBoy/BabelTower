@@ -104,8 +104,8 @@ metadata:
   - `SAVED` 状态：直接 upsert `dictionary` 并创建 `dictionaryRevision` 审计记录
   - 其他状态：返回错误
 - 重新计算未解决冲突摘要
-- 创建 `kind=AUTOSAVED` 快照，version = baseVersion + 1
-- 更新 `task.latestVersion`
+- **不再创建 AUTOSAVED 快照**（仅更新 draftRows 或 dictionary）
+- 返回 `{ currentVersion, conflictSummary?, target: "draft" | "official" }`
 
 ### 保存任务 (POST `/api/tasks/{id}/save`)
 
@@ -120,11 +120,13 @@ metadata:
 
 **行为**：
 - 检查未解决的 BLOCKING 冲突，存在且未提供 resolutions 则返回 409
-- 遍历 snapshot.previewRows，按 `chineseHash` upsert Dictionary
-- 创建 `dictionaryRevision` 审计记录
+- 遍历 snapshot.previewRows，按 `chineseHash` 写入 Dictionary
+- 使用 `seenHashes` Set 跳过任务内重复的中文
+- 如果英文译文与已有字典相同（归一化后），跳过（不更新 usageCount）
+- 区分 `create` 和 `update` 操作，均创建 `dictionaryRevision` 审计记录
 - 标记所有未解决冲突为已解决
-- 创建 `kind=SAVED` 快照
-- 更新 task：`status=SAVED`, `isEditable=false`
+- **不创建新快照，不修改 task status/isEditable/latestVersion**
+- **只更新 `dictionarySyncedAt`**
 
 **响应**：
 ```typescript
@@ -157,7 +159,7 @@ metadata:
 }
 ```
 
-**注意**：当前实现返回 JSON 对象（含文件内容字符串），客户端用 Blob/URL.createObjectURL 处理下载。历史上曾尝试改为 `application/zip` 二进制流（commit c82e162），后回退。
+**注意**：返回 JSON 对象（含文件内容字符串），包含两个文件：源文件（保留中文）和翻译文件（使用英文译文）。客户端用 Blob/URL.createObjectURL 处理下载。翻译文件名通过 `buildTranslatedFilename` 自动推断。
 
 ### 验证任务 (POST `/api/tasks/{id}/validate`)
 

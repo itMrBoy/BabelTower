@@ -107,11 +107,13 @@ metadata:
 | `targetFilename` | VarChar(255)? | - | 目标文件名 |
 | `createdById` | UUID? | - | 创建者 |
 | `savedAt` | DateTime? | - | 保存时间 |
+| `dictionarySyncedAt` | DateTime? | - | 字典同步时间（save API 更新） |
 | `createdAt` | DateTime | `@default(now())` | 创建时间 |
 | `updatedAt` | DateTime | `@updatedAt` | 更新时间 |
 
 **关系**:
 - `snapshots` -> `TaskSnapshot[]` (1:N, Cascade Delete)
+- `draftRows` -> `TaskDraftRow[]` (1:N, Cascade Delete)
 - `conflicts` -> `DictionaryConflict[]` (1:N, Cascade Delete)
 
 **索引**:
@@ -284,13 +286,17 @@ taskSnapshot.create()          [kind=MANUAL_DRAFT]
 ### 4. 保存到字典 (`src/app/api/tasks/[taskId]/save/route.ts`)
 
 ```
-优先取 draftRows，回退到 snapshot.previewRows:
-  dictionary.upsert()          [按 chineseHash]
-  dictionaryRevision.create()  [记录变更历史]
+遍历 snapshot.previewRows:
+  seenHashes.add(chineseHash)
+  重复 chineseHash: skipped++
+  无 existing: dictionary.create + dictionaryRevision [created++]
+  英文相同: skipped++
+  英文不同: dictionary.update + dictionaryRevision [updated++]
 dictionaryConflict.updateMany() [标记所有未解决冲突为已解决]
-taskSnapshot.create()          [kind=SAVED, version+1]
-translationTask.update()       [status=SAVED, isEditable=false]
+translationTask.update()       [dictionarySyncedAt=new Date()]
 ```
+
+**注意**：save API 不再创建 SAVED 快照，不修改 task status/isEditable/latestVersion，仅更新 `dictionarySyncedAt`。
 
 ## Prisma Client 配置
 
