@@ -8,6 +8,7 @@ import {
   exportValidationMessage,
   summarizeExportValidationErrors,
 } from "@/lib/export-validation";
+import { apiFetch } from "@/lib/http-client";
 import { useMessage } from "@/components/message-provider";
 
 type ExportFormat = "JSON" | "PROPERTIES" | "TS";
@@ -55,7 +56,7 @@ export default function ExportPage() {
     setExporting(true);
         setValidationErrors([]);
     try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(currentTask.id)}/export`, {
+      const response = await apiFetch(`/api/tasks/${encodeURIComponent(currentTask.id)}/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

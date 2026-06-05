@@ -1,8 +1,11 @@
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import { deleteLocalProject, isDatabaseUnavailable, updateLocalProject } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 
 export async function PATCH(request: Request, context: { params: Promise<{ projectId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
   const { projectId } = await context.params;
   const body = await request.json();
   const name = String(body.name ?? "").trim();
@@ -40,6 +43,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
 }
 
 export async function DELETE(_request: Request, context: { params: Promise<{ projectId: string }> }) {
+  const auth = await requireUser(_request);
+  if (auth.response) return auth.response;
   const { projectId } = await context.params;
 
   try {

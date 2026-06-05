@@ -1,4 +1,5 @@
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import {
   getLatestLocalSnapshot,
   getLocalCurrentRows,
@@ -11,10 +12,16 @@ import { prisma } from "@/lib/prisma";
 import { draftRowsToPreviewRows, previewRowToDraftData } from "@/lib/standard";
 
 export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(_request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   try {
     const task = await prisma.translationTask.findUnique({ where: { id: taskId } });
     if (!task) return fail("task not found", 404);
+    if (task.status === "DRAFT" && task.isEditable && task.createdById !== currentUser.id) {
+      return fail("task not found", 404);
+    }
     const latestSnapshot = await prisma.taskSnapshot.findFirst({
       where: { taskId },
       orderBy: { version: "desc" },
@@ -37,6 +44,9 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
     if (isDatabaseUnavailable(error)) {
       const task = getLocalTask(taskId);
       if (!task) return fail("task not found", 404);
+      if (task.status === "DRAFT" && task.isEditable && task.createdById !== currentUser.id) {
+        return fail("task not found", 404);
+      }
       initializeLocalDraftRowsFromSnapshot(taskId);
       return ok({
         task,

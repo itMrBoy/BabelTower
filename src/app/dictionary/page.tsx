@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SearchIcon } from "@/components/icons";
 import { useMessage } from "@/components/message-provider";
+import { apiFetch } from "@/lib/http-client";
 
 interface DictEntry {
   id: string;
@@ -112,7 +113,7 @@ export default function DictionaryPage() {
       setLoading(true);
       try {
         const url = `/api/dictionaries?q=${encodeURIComponent(trimmed)}&field=${f}&limit=50`;
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await apiFetch(url, { signal: controller.signal });
         const body = (await response.json()) as { items?: DictEntry[]; error?: { message?: string } };
         if (!response.ok) {
           const errMsg = body.error?.message ?? `请求失败 (HTTP ${response.status})`;

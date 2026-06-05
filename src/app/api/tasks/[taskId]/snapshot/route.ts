@@ -1,11 +1,15 @@
 import { NextRequest } from "next/server";
 import { Prisma, SnapshotKind, TaskStatus } from "@prisma/client";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import { createLocalSnapshot, getLocalCurrentRows, isDatabaseUnavailable } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import { draftRowsToPreviewRows } from "@/lib/standard";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   const body = await request.json();
   const baseVersion = Number(body.baseVersion);
@@ -17,6 +21,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     if (task.status !== TaskStatus.DRAFT || !task.isEditable) {
       return fail("task is not draft editable", 409);
     }
+    if (task.createdById !== currentUser.id) return fail("task not found", 404);
     if (task.latestVersion !== baseVersion) {
       return fail("snapshot version conflict", 409, { expected: task.latestVersion, actual: baseVersion });
     }
@@ -36,6 +41,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
           standardDocuments: (latest?.standardDocuments ?? {}) as Prisma.InputJsonValue,
           previewRows: previewRows as Prisma.InputJsonValue,
           conflictSummary: (latest?.conflictSummary ?? {}) as Prisma.InputJsonValue,
+          createdById: currentUser.id,
         },
       });
       const savedTask = await tx.translationTask.update({
@@ -57,7 +63,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
       return fail("snapshot create failed", 500, error instanceof Error ? error.message : String(error));
     }
     try {
-      const result = createLocalSnapshot({ taskId, baseVersion, rows: getLocalCurrentRows(taskId), kind: "SAVED" });
+      const result = createLocalSnapshot({
+        taskId,
+        baseVersion,
+        rows: getLocalCurrentRows(taskId),
+        kind: "SAVED",
+        createdById: currentUser.id,
+      });
       return ok({ ...result, localFallback: true });
     } catch (localError) {
       const anyError = localError as Error & { expected?: number; actual?: number };

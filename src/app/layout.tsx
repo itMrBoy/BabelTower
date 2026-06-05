@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/layout/sidebar";
-import TopBar from "@/components/layout/topbar";
-import { MessageProvider } from "@/components/message-provider";
+import AppShell from "@/components/layout/app-shell";
 
 export const metadata: Metadata = {
   title: "BabelTower",
@@ -17,16 +15,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body className="h-screen flex overflow-hidden">
-        <MessageProvider>
-          <Sidebar />
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <TopBar />
-            <main className="flex-1 overflow-auto bg-slate-100">
-              {children}
-            </main>
-          </div>
-        </MessageProvider>
+      <body>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

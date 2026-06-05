@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { pbkdf2Sync, randomUUID } from "node:crypto";
 import type {
   ConflictItem,
   ConflictSummary,
@@ -119,7 +119,19 @@ type LocalDraftRow = {
   updatedAt: Date;
 };
 
+export type LocalUser = {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: "ADMIN" | "MAINTAINER";
+  isActive: boolean;
+  tokenVersion: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type LocalStore = {
+  users: LocalUser[];
   projects: LocalProject[];
   tasks: LocalTask[];
   snapshots: LocalSnapshot[];
@@ -135,6 +147,7 @@ const globalForStore = globalThis as typeof globalThis & {
 function store() {
   if (!globalForStore.__babelTowerLocalStore) {
     globalForStore.__babelTowerLocalStore = {
+      users: [],
       projects: [],
       tasks: [],
       snapshots: [],
@@ -148,6 +161,144 @@ function store() {
 
 function now() {
   return new Date();
+}
+
+function hashLocalAdminPassword() {
+  // Same format as src/lib/password.ts; duplicated here to avoid importing server auth helpers into fallback state.
+  const salt = "babeltower-local-admin";
+  const hash = pbkdf2Sync("Snow@123", salt, 120000, 32, "sha256").toString("hex");
+  return `pbkdf2_sha256$120000$${salt}$${hash}`;
+}
+
+export function seedLocalAdmin() {
+  const state = store();
+  const existing = state.users.find((user) => user.username === "admin");
+  if (existing) {
+    existing.role = "ADMIN";
+    existing.isActive = true;
+    existing.updatedAt = now();
+    return existing;
+  }
+  const user: LocalUser = {
+    id: randomUUID(),
+    username: "admin",
+    passwordHash: hashLocalAdminPassword(),
+    role: "ADMIN",
+    isActive: true,
+    tokenVersion: 1,
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  state.users.push(user);
+  return user;
+}
+
+export function clearLocalUserCache(_userId: string) {
+  // local-store reads user state directly, so there is no separate local cache to clear.
+}
+
+export function getLocalUserByUsername(username: string) {
+  return store().users.find((user) => user.username.toLowerCase() === username.toLowerCase()) ?? null;
+}
+
+export function getLocalUserById(userId: string) {
+  return store().users.find((user) => user.id === userId) ?? null;
+}
+
+export function listLocalUsers(args: { username?: string; isActive?: boolean }) {
+  const username = args.username?.trim().toLowerCase();
+  return [...store().users]
+    .filter((user) => {
+      if (username && !user.username.toLowerCase().includes(username)) return false;
+      if (typeof args.isActive === "boolean" && user.isActive !== args.isActive) return false;
+      return true;
+    })
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+export function createLocalUser(data: {
+  username: string;
+  passwordHash: string;
+  role?: "ADMIN" | "MAINTAINER";
+}) {
+  const state = store();
+  if (getLocalUserByUsername(data.username)) {
+    const error = new Error("username already exists");
+    (error as Error & { code?: string }).code = "P2002";
+    throw error;
+  }
+  const user: LocalUser = {
+    id: randomUUID(),
+    username: data.username,
+    passwordHash: data.passwordHash,
+    role: data.role ?? "MAINTAINER",
+    isActive: true,
+    tokenVersion: 1,
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  state.users.unshift(user);
+  return user;
+}
+
+export function updateLocalAccount(
+  userId: string,
+  data: { username?: string; passwordHash?: string },
+) {
+  const user = getLocalUserById(userId);
+  if (!user) return null;
+  if (data.username && data.username !== user.username && getLocalUserByUsername(data.username)) {
+    const error = new Error("username already exists");
+    (error as Error & { code?: string }).code = "P2002";
+    throw error;
+  }
+  if (data.username) user.username = data.username;
+  if (data.passwordHash) {
+    user.passwordHash = data.passwordHash;
+    user.tokenVersion += 1;
+  }
+  user.updatedAt = now();
+  return user;
+}
+
+export function setLocalUserActive(userId: string, isActive: boolean) {
+  const user = getLocalUserById(userId);
+  if (!user) return null;
+  user.isActive = isActive;
+  user.tokenVersion += 1;
+  user.updatedAt = now();
+  return user;
+}
+
+export function countLocalActiveAdmins(excludingUserId?: string) {
+  return store().users.filter(
+    (user) => user.role === "ADMIN" && user.isActive && user.id !== excludingUserId,
+  ).length;
+}
+
+export function localUserBusinessUsage(userId: string) {
+  const state = store();
+  return {
+    projects: state.projects.filter((item) => item.createdById === userId).length,
+    tasks: state.tasks.filter((item) => item.createdById === userId).length,
+    snapshots: state.snapshots.filter((item) => item.createdById === userId).length,
+    dictionaries: state.dictionaries.filter((item) => item.createdById === userId || item.updatedById === userId).length,
+    conflicts: state.conflicts.filter((item) => item.resolvedById === userId).length,
+  };
+}
+
+export function deleteLocalUser(userId: string) {
+  const state = store();
+  const usage = localUserBusinessUsage(userId);
+  if (Object.values(usage).some((value) => value > 0)) {
+    const error = new Error("user has business data");
+    (error as Error & { usage?: typeof usage }).usage = usage;
+    throw error;
+  }
+  const existing = getLocalUserById(userId);
+  if (!existing) return null;
+  state.users = state.users.filter((user) => user.id !== userId);
+  return existing;
 }
 
 function sortByUpdatedAt<T extends { updatedAt: Date }>(items: T[]) {
@@ -315,6 +466,7 @@ export function createLocalImportTask(args: {
   previewRows: PreviewRow[];
   conflictSummary: ConflictSummary;
   summary: ConflictSummaryCounts;
+  createdById?: string | null;
 }) {
   const state = store();
   const project = state.projects.find((item) => item.id === args.projectId);
@@ -333,7 +485,7 @@ export function createLocalImportTask(args: {
     latestVersion: 1,
     sourceFilename: args.sourceFilename,
     targetFilename: args.targetFilename ?? null,
-    createdById: null,
+    createdById: args.createdById ?? null,
     savedAt: null,
     dictionarySyncedAt: null,
     createdAt: now(),
@@ -348,7 +500,7 @@ export function createLocalImportTask(args: {
     standardDocuments: { source: args.document, target: args.targetDocument ?? null },
     previewRows: args.previewRows,
     conflictSummary: args.summary,
-    createdById: null,
+    createdById: args.createdById ?? null,
     createdAt: now(),
   };
 
@@ -471,6 +623,7 @@ export function createLocalSnapshot(args: {
   baseVersion: number;
   rows?: PreviewRow[];
   kind: "AUTOSAVED" | "MANUAL_DRAFT" | "SAVED";
+  createdById?: string | null;
 }) {
   const state = store();
   const task = state.tasks.find((item) => item.id === args.taskId);
@@ -494,7 +647,7 @@ export function createLocalSnapshot(args: {
     standardDocuments: latest?.standardDocuments ?? {},
     previewRows: args.rows ?? getLocalCurrentRows(args.taskId),
     conflictSummary: latest?.conflictSummary ?? { blocking: 0, warning: 0, info: 0, hasBlocking: false },
-    createdById: null,
+    createdById: args.createdById ?? null,
     createdAt: now(),
   };
   task.latestVersion = snapshot.version;
@@ -512,6 +665,7 @@ export function createLocalSnapshot(args: {
 export function resolveLocalConflicts(
   taskId: string,
   resolutions: { key: string; resolution: string }[],
+  resolvedById?: string | null,
 ) {
   const allowed: LocalConflict["resolution"][] = [
     "KEEP_EXISTING",
@@ -532,6 +686,7 @@ export function resolveLocalConflicts(
       ) {
         conflict.resolvedAt = resolvedAt;
         conflict.resolution = resolution;
+        conflict.resolvedById = resolvedById ?? null;
       }
     }
   }
@@ -609,6 +764,7 @@ export function upsertLocalDictionary(data: {
   tags?: string[];
   note?: string | null;
   usageIncrement?: number;
+  userId?: string | null;
 }) {
   const state = store();
   const hash = chineseHash(data.chineseText);
@@ -619,6 +775,7 @@ export function upsertLocalDictionary(data: {
     existing.tags = data.tags ?? existing.tags;
     existing.note = data.note ?? existing.note;
     existing.usageCount += data.usageIncrement ?? 0;
+    existing.updatedById = data.userId ?? existing.updatedById;
     existing.updatedAt = now();
     return { entry: existing, existed: true };
   }
@@ -633,8 +790,8 @@ export function upsertLocalDictionary(data: {
     tags: data.tags ?? [],
     note: data.note ?? null,
     usageCount: data.usageIncrement ?? 0,
-    createdById: null,
-    updatedById: null,
+    createdById: data.userId ?? null,
+    updatedById: data.userId ?? null,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -646,7 +803,7 @@ export function findLocalDictionaryByChineseHash(hash: string) {
   return store().dictionaries.find((entry) => entry.chineseHash === hash) ?? null;
 }
 
-export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: number) {
+export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: number, userId?: string | null) {
   const state = store();
   const snapshot = getLocalSnapshot(taskId, snapshotVersion);
   const task = getLocalTask(taskId);
@@ -673,7 +830,7 @@ export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: numbe
 
     const existing = findLocalDictionaryByChineseHash(hash);
     if (!existing) {
-      upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1 });
+      upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1, userId });
       created++;
       continue;
     }
@@ -681,7 +838,7 @@ export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: numbe
       skipped++;
       continue;
     }
-    upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1 });
+    upsertLocalDictionary({ chineseText, englishText, usageIncrement: 1, userId });
     updated++;
   }
 
@@ -689,6 +846,7 @@ export function saveLocalTaskToDictionary(taskId: string, snapshotVersion: numbe
     if (conflict.taskId === taskId && conflict.resolvedAt === null) {
       conflict.resolvedAt = now();
       conflict.resolution = "UPDATE_DICTIONARY";
+      conflict.resolvedById = userId ?? null;
     }
   }
 
@@ -714,8 +872,25 @@ export function getLocalCurrentTask(projectId: string) {
   return sortByUpdatedAt(state.tasks.filter((task) => task.projectId === projectId && task.status === "DRAFT" && task.isEditable))[0] ?? null;
 }
 
+export function userCanAccessLocalTask(taskId: string, userId: string) {
+  const task = getLocalTask(taskId);
+  if (!task) return false;
+  return task.status !== "DRAFT" || task.createdById === userId;
+}
+
+export function userCanAccessLocalSnapshot(taskId: string, snapshotId: string | null, userId: string) {
+  const task = getLocalTask(taskId);
+  if (!task) return false;
+  if (task.status !== "DRAFT") return true;
+  if (task.createdById !== userId) return false;
+  if (!snapshotId) return true;
+  const snapshot = store().snapshots.find((item) => item.id === snapshotId);
+  return !snapshot || snapshot.createdById === userId;
+}
+
 export function clearLocalStore() {
   globalForStore.__babelTowerLocalStore = {
+    users: [],
     projects: [],
     tasks: [],
     snapshots: [],

@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { ConflictSeverity, ConflictType } from "@prisma/client";
 import { fail, ok } from "@/lib/api";
-import { isDatabaseUnavailable, listLocalTaskConflicts } from "@/lib/local-store";
+import { requireUser } from "@/lib/auth";
+import { isDatabaseUnavailable, listLocalTaskConflicts, userCanAccessLocalTask } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 
 type TaskConflictRow = {
@@ -45,6 +46,9 @@ function summarize(rows: TaskConflictRow[]) {
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   const { searchParams } = new URL(request.url);
   const unresolvedOnly = searchParams.get("unresolvedOnly") !== "false";
@@ -53,6 +57,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tas
     const rows = await prisma.dictionaryConflict.findMany({
       where: {
         taskId,
+        task: {
+          OR: [
+            { status: { not: "DRAFT" } },
+            { createdById: currentUser.id },
+          ],
+        },
         ...(unresolvedOnly ? { resolvedAt: null } : {}),
       },
       orderBy: { createdAt: "desc" },
@@ -60,6 +70,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tas
     return ok({ items: rows.map(toApiConflict), conflictSummary: summarize(rows) });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
+      if (!userCanAccessLocalTask(taskId, currentUser.id)) return fail("task not found", 404);
       const rows = listLocalTaskConflicts(taskId, unresolvedOnly);
       return ok({
         items: rows.map(toApiConflict),

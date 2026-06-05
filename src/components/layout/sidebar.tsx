@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
 import {
   UploadIcon,
   AlertTriangleIcon,
@@ -16,6 +17,7 @@ interface NavItem {
   label: string;
   icon: React.ReactNode;
   badge?: number;
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -29,11 +31,14 @@ const navItems: NavItem[] = [
   { href: "/dictionary", label: "字典检索", icon: <SearchIcon size={18} /> },
   { href: "/snapshots", label: "任务快照", icon: <ClockIcon size={18} /> },
   { href: "/export", label: "导出配置", icon: <DownloadIcon size={18} /> },
-  { href: "/settings", label: "系统配置", icon: <RefreshCwIcon size={18} /> },
+  { href: "/account", label: "个人设置", icon: <RefreshCwIcon size={18} /> },
+  { href: "/users", label: "用户管理", icon: <SearchIcon size={18} />, adminOnly: true },
+  { href: "/settings", label: "系统配置", icon: <RefreshCwIcon size={18} />, adminOnly: true },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   return (
     <aside className="w-60 bg-sidebar-bg text-sidebar-text flex flex-col flex-shrink-0">
@@ -46,7 +51,7 @@ export default function Sidebar() {
         <span className="font-semibold text-white text-base">BabelTower</span>
       </div>
       <nav className="flex-1 py-4 space-y-1 px-3">
-        {navItems.map((item) => {
+        {navItems.filter((item) => !item.adminOnly || user?.role === "ADMIN").map((item) => {
           const active = pathname === item.href;
           return (
             <Link

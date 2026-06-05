@@ -14,6 +14,13 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+vi.mock("@/lib/auth", () => ({
+  requireAdmin: vi.fn(async () => ({
+    response: null,
+    user: { id: "admin-user", username: "admin", role: "ADMIN", tokenVersion: 1 },
+  })),
+}));
+
 vi.mock("@/lib/local-store", () => ({
   clearLocalDictionaries: mocks.clearLocalDictionaries,
   clearLocalProjects: mocks.clearLocalProjects,

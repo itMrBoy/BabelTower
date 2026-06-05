@@ -1,0 +1,78 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
+import { useMessage } from "@/components/message-provider";
+import { requestJson } from "@/lib/http-client";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user, refresh } = useAuth();
+  const message = useMessage();
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const next = searchParams.get("next") || "/";
+
+  useEffect(() => {
+    if (user) router.replace(next);
+  }, [next, router, user]);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await requestJson("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      await refresh();
+      router.replace(next);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen grid place-items-center px-4">
+      <form className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm" onSubmit={submit}>
+        <div className="mb-6 flex items-center gap-3">
+          <img src="/babeltower-icon.svg" alt="BabelTower" className="h-10 w-10 rounded-lg bg-white" />
+          <div>
+            <h1 className="text-lg font-semibold text-slate-900">BabelTower 登录</h1>
+            <p className="text-sm text-slate-500">使用账号密码进入工作台</p>
+          </div>
+        </div>
+        <label className="mb-3 block text-sm text-slate-600">
+          用户名
+          <input
+            className="mt-1"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+          />
+        </label>
+        <label className="mb-5 block text-sm text-slate-600">
+          密码
+          <input
+            className="mt-1"
+            type="password"
+            value={password}
+            placeholder="请输入密码"
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            autoFocus
+          />
+        </label>
+        <button className="primary wide" type="submit" disabled={busy}>
+          {busy ? "登录中..." : "登录"}
+        </button>
+      </form>
+    </div>
+  );
+}

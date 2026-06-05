@@ -24,6 +24,9 @@
     "openapi:validate": "npx @redocly/cli lint openapi/babeltower.v1.yaml",
     "ci:check": "npm run typecheck && npm run test && npm run db:validate"
   },
+  "prisma": {
+    "seed": "node prisma/seed.mjs"
+  },
   "dependencies": {
     "@prisma/client": "^6.7.0",
     "next": "^15.3.0",

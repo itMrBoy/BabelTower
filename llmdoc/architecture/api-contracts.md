@@ -21,7 +21,31 @@ metadata:
 
 降级响应额外包含 `localFallback: true` 标志。
 
+## 鉴权与权限
+
+- `POST /api/auth/login` 使用账号密码登录，成功后写入 8 小时 HttpOnly Cookie。
+- Cookie token 包含 `userId`、`username`、`role`、`tokenVersion`、`exp` 并做 HMAC 签名。
+- 受保护 API 每次先校验 token 签名和过期时间，再校验服务端用户状态缓存/数据库中的 `isActive` 与 `tokenVersion`。
+- 用户禁用、启用、改密码、删除后会清理用户状态缓存；禁用用户下一次受保护 API 请求返回 401。
+- 健康检查、登录、退出和 `GET /api/auth/me` 之外，业务 API 默认要求登录。
+- 系统配置、用户管理和开发态 `DELETE /api/debug/local-store` 要求 `ADMIN`。
+- `createdById`、`updatedById`、`changedById`、`resolvedById` 由服务端当前登录用户写入，不接受前端传入的同名字段作为审计来源。
+- `DRAFT` 任务、草稿行和暂存快照仅创建人可读写；非 `DRAFT` 已保存数据对登录用户共享可见。
+
 ## 端点清单
+
+### 鉴权 / 用户
+
+| 方法 | 路径 | 功能 | Body / 查询参数 |
+|------|------|------|-----------------|
+| POST | `/api/auth/login` | 登录并写入 HttpOnly Cookie | `{ username, password }` |
+| POST | `/api/auth/logout` | 清除登录 Cookie | - |
+| GET | `/api/auth/me` | 当前登录用户 | - |
+| PATCH | `/api/account` | 当前用户修改用户名/密码 | `{ username?, currentPassword?, password? }` |
+| GET | `/api/users` | 管理员查询用户 | `username`, `isActive` |
+| POST | `/api/users` | 管理员新增维护者，随机密码一次性返回 | `{ username }` |
+| PATCH | `/api/users/{id}` | 管理员启用/禁用用户 | `{ isActive }` |
+| DELETE | `/api/users/{id}` | 管理员删除无业务数据用户 | - |
 
 ### 健康检查
 
@@ -34,7 +58,7 @@ metadata:
 | 方法 | 路径 | 功能 | 查询参数 / Body |
 |------|------|------|-----------------|
 | GET | `/api/projects` | 项目列表 | `q` (搜索), `limit` (默认 20, 最大 100) |
-| POST | `/api/projects` | 创建项目 | `{ code, name, description?, createdById? }` |
+| POST | `/api/projects` | 创建项目 | `{ name, description? }` |
 | PATCH | `/api/projects/{id}` | 更新项目 | `{ name, description? }` |
 | DELETE | `/api/projects/{id}` | 删除项目 | - |
 | GET | `/api/projects/{id}/current-task` | 项目最新可编辑任务 | - |
@@ -65,7 +89,7 @@ metadata:
 
 | 方法 | 路径 | 功能 | Body |
 |------|------|------|------|
-| POST | `/api/settings/maintenance` | 清空字典、清空快照、或同时重置快照和字典 | `{ action: "clear-dictionaries" \| "clear-snapshots" \| "reset-system" }` |
+| POST | `/api/settings/maintenance` | 管理员清空字典、清空快照、或同时重置快照和字典 | `{ action: "clear-dictionaries" \| "clear-snapshots" \| "reset-system", clearProjects? }` |
 
 ## 请求/响应数据契约
 
@@ -104,7 +128,7 @@ metadata:
 
 **行为**：
 - 验证 `baseVersion === task.latestVersion`，不匹配返回 409
-- 如提供 `resolvedConflicts`，更新 `dictionaryConflict` 记录
+- 如提供 `resolvedConflicts`，更新 `dictionaryConflict` 记录，并写入当前用户为 `resolvedById`
 - **任务状态决定存储目标**：
   - `DRAFT` 状态：将行数据 upsert 到 `taskDraftRow` 表（按 `taskId + rowKey` 唯一键）
   - `SAVED` 状态：直接 upsert `dictionary` 并创建 `dictionaryRevision` 审计记录
@@ -207,7 +231,7 @@ metadata:
 - 运行 `detectConflicts()`  against 所有字典条目（最多 500 条）
 - 如存在 blocking 冲突且 resolution 不是 `UPDATE_DICTIONARY`，返回 409
 - Upsert via `prisma.dictionary.upsert({ where: { chineseHash } })`
-- 创建 `dictionaryRevision` 审计记录
+- 创建 `dictionaryRevision` 审计记录，`changedById` 来自当前登录用户
 
 ### 冲突检测 (POST `/api/dictionaries/conflicts`)
 
@@ -276,7 +300,7 @@ metadata:
 
 ## 数据库降级模式
 
-所有 API 路由遵循统一降级模式：
+受保护 API 路由遵循统一降级模式：
 
 ```typescript
 try {
@@ -298,6 +322,8 @@ try {
 
 | API 路由 | 本地回退函数 |
 |----------|-------------|
+| POST `/api/auth/login` | `seedLocalAdmin` / `getLocalUserByUsername` |
+| GET/PATCH/DELETE `/api/users...` | `listLocalUsers` / `createLocalUser` / `setLocalUserActive` / `deleteLocalUser` |
 | GET/POST `/api/projects` | `listLocalProjects` / `createLocalProject` |
 | PATCH `/api/projects/{id}` | `updateLocalProject` |
 | DELETE `/api/projects/{id}` | `deleteLocalProject` |

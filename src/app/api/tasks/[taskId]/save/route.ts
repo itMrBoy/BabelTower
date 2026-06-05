@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import {
   isDatabaseUnavailable,
   saveLocalTaskToDictionary,
@@ -14,6 +15,9 @@ function sameNormalizedText(left: string, right: string) {
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   const body = await request.json();
   const snapshotVersion = Number(body.snapshotVersion);
@@ -29,8 +33,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
 
     const snapshot = await prisma.taskSnapshot.findUnique({
       where: { taskId_version: { taskId, version: snapshotVersion } },
+      include: { task: true },
     });
     if (!snapshot) return fail("snapshot not found", 404);
+    if (snapshot.task.status === "DRAFT" && snapshot.task.isEditable && snapshot.task.createdById !== currentUser.id) {
+      return fail("snapshot not found", 404);
+    }
 
     const rows = snapshot.previewRows as unknown as PreviewRow[];
     let created = 0;
@@ -65,6 +73,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
               englishText,
               normalizedEnglish: normalizeText(englishText),
               usageCount: 1,
+              createdById: currentUser.id,
+              updatedById: currentUser.id,
             },
           });
           await tx.dictionaryRevision.create({
@@ -73,7 +83,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
               previousEnglish: null,
               nextEnglish: englishText,
               reason: "task save",
-              changedById: body.changedById ?? null,
+              changedById: currentUser.id,
             },
           });
           created++;
@@ -93,6 +103,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
             englishText,
             normalizedEnglish: normalizeText(englishText),
             usageCount: { increment: 1 },
+            updatedById: currentUser.id,
           },
         });
 
@@ -102,7 +113,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
             previousEnglish: existing?.englishText ?? null,
             nextEnglish: englishText,
             reason: "task save",
-            changedById: body.changedById ?? null,
+            changedById: currentUser.id,
           },
         });
         updated++;
@@ -110,7 +121,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
 
       await tx.dictionaryConflict.updateMany({
         where: { taskId, resolvedAt: null },
-        data: { resolvedAt: new Date(), resolution: "UPDATE_DICTIONARY" },
+        data: { resolvedAt: new Date(), resolution: "UPDATE_DICTIONARY", resolvedById: currentUser.id },
       });
 
       const task = await tx.translationTask.update({
@@ -134,7 +145,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
       return ok({ conflicts, localFallback: true }, 409);
     }
     try {
-      return ok({ ...saveLocalTaskToDictionary(taskId, snapshotVersion), localFallback: true });
+      return ok({ ...saveLocalTaskToDictionary(taskId, snapshotVersion, currentUser.id), localFallback: true });
     } catch (localError) {
       const message = localError instanceof Error ? localError.message : String(localError);
       return fail(message, message === "snapshot not found" ? 404 : 500);

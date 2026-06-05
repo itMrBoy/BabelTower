@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ConflictResolution, ConflictSeverity, TaskStatus } from "@prisma/client";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import {
   isDatabaseUnavailable,
   resolveLocalConflicts,
@@ -53,6 +54,9 @@ function summarizeConflictGroups(
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   const body = await request.json();
   const baseVersion = Number(body.baseVersion);
@@ -63,6 +67,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
   try {
     const task = await prisma.translationTask.findUnique({ where: { id: taskId } });
     if (!task) return fail("task not found", 404);
+    if (task.status === TaskStatus.DRAFT && task.isEditable && task.createdById !== currentUser.id) {
+      return fail("task not found", 404);
+    }
     if (task.latestVersion !== baseVersion) {
       return fail("snapshot version conflict", 409, { expected: task.latestVersion, actual: baseVersion });
     }
@@ -73,7 +80,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
         for (const item of resolvedConflicts) {
           await tx.dictionaryConflict.updateMany({
             where: { taskId, candidateKey: item.key, resolvedAt: null },
-            data: { resolvedAt, resolution: item.resolution },
+            data: { resolvedAt, resolution: item.resolution, resolvedById: currentUser.id },
           });
         }
       }
@@ -116,6 +123,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
             update: {
               englishText,
               normalizedEnglish: normalizeText(englishText),
+              updatedById: currentUser.id,
             },
             create: {
               chineseText,
@@ -124,6 +132,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
               englishText,
               normalizedEnglish: normalizeText(englishText),
               usageCount: 1,
+              createdById: currentUser.id,
+              updatedById: currentUser.id,
             },
           });
           await tx.dictionaryRevision.create({
@@ -132,6 +142,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
               previousEnglish: existing?.englishText ?? null,
               nextEnglish: englishText,
               reason: "official row update",
+              changedById: currentUser.id,
             },
           });
         }
@@ -161,7 +172,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
     try {
       upsertLocalDraftRows(taskId, rows);
       if (resolvedConflicts.length > 0) {
-        resolveLocalConflicts(taskId, resolvedConflicts);
+        resolveLocalConflicts(taskId, resolvedConflicts, currentUser.id);
         const conflictSummary = summarizeLocalConflictCounts(taskId);
         return ok({ currentVersion: baseVersion, conflictSummary, target: "draft", localFallback: true });
       }

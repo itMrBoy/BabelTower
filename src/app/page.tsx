@@ -8,6 +8,7 @@ import {
   summarizeExportValidationErrors,
   type ExportValidationError,
 } from "@/lib/export-validation";
+import { apiFetch } from "@/lib/http-client";
 import { useMessage } from "@/components/message-provider";
 
 type Project = {
@@ -111,7 +112,7 @@ async function readBody(response: Response): Promise<Record<string, unknown>> {
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const response = await apiFetch(input, init);
   const body = await readBody(response);
   if (!response.ok) {
     throw new Error(getErrorMessage(body, response.status));
@@ -793,7 +794,7 @@ export default function Home() {
     setBusy("save");
     try {
       const version = await ensureCurrentPageSnapshot();
-      const response = await fetch(`/api/tasks/${task.id}/save`, {
+      const response = await apiFetch(`/api/tasks/${task.id}/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ snapshotVersion: version }),
@@ -825,7 +826,7 @@ export default function Home() {
     setBusy("export");
     try {
       const version = await ensureCurrentPageSnapshot();
-      const response = await fetch(`/api/tasks/${task.id}/export`, {
+      const response = await apiFetch(`/api/tasks/${task.id}/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ snapshotVersion: version, fileBaseName: task.name }),
@@ -884,7 +885,7 @@ export default function Home() {
     }
     setBusy("dictionaryCreate");
     try {
-      const response = await fetch("/api/dictionaries", {
+      const response = await apiFetch("/api/dictionaries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, ok, parseLimit } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import { createLocalProject, findLocalProjectByName, isDatabaseUnavailable, listLocalProjects } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 
@@ -10,6 +11,8 @@ function generateProjectCode() {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
   const limit = parseLimit(searchParams.get("limit"));
@@ -34,6 +37,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const body = await request.json();
   const name = String(body.name ?? "").trim();
   if (!name) return fail("name is required", 400);
@@ -49,7 +55,7 @@ export async function POST(request: NextRequest) {
         code: generateProjectCode(),
         name,
         description: body.description ?? null,
-        createdById: body.createdById ?? null,
+        createdById: currentUser.id,
       },
     });
     return ok({ project }, 201);
@@ -61,7 +67,7 @@ export async function POST(request: NextRequest) {
         code: generateProjectCode(),
         name,
         description: body.description ?? null,
-        createdById: body.createdById ?? null,
+        createdById: currentUser.id,
       });
       return ok({ project, localFallback: true }, 201);
     }

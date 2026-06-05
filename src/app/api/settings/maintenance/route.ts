@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api";
+import { requireAdmin } from "@/lib/auth";
 import { clearDictionaryQueryCache } from "@/lib/dictionary-query-cache";
 import {
   clearLocalDictionaries,
@@ -149,6 +150,8 @@ function runLocalAction(action: MaintenanceAction, clearProjects: boolean) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin(request);
+  if (auth.response) return auth.response;
   const body = (await request.json().catch(() => null)) as { action?: unknown; clearProjects?: unknown } | null;
   const action = parseAction(body?.action);
   const clearProjects = body?.clearProjects === true;

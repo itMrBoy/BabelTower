@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import { isDatabaseUnavailable, listLocalSnapshots } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 
@@ -10,6 +11,9 @@ function parseLimit(value: string | null) {
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   const { searchParams } = new URL(request.url);
   const includeRows = searchParams.get("includeRows") === "true";
@@ -19,7 +23,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tas
 
   try {
     const items = await prisma.taskSnapshot.findMany({
-      where: { taskId },
+      where: {
+        taskId,
+        task: {
+          OR: [
+            { status: { not: "DRAFT" } },
+            { createdById: currentUser.id },
+          ],
+        },
+      },
       orderBy: { version: "desc" },
       take,
       select: {
@@ -43,7 +55,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tas
     return ok({ items });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
-      const snapshots = listLocalSnapshots(taskId).slice(0, take ?? undefined);
+      const snapshots = listLocalSnapshots(taskId)
+        .filter((snapshot) => snapshot.createdById === null || snapshot.createdById === currentUser.id)
+        .slice(0, take ?? undefined);
       const items = includeRows
         ? snapshots
         : snapshots.map(({ standardDocuments: _standardDocuments, previewRows: _previewRows, ...snapshot }) => snapshot);

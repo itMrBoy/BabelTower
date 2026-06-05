@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangleIcon, RefreshCwIcon, TrashIcon } from "@/components/icons";
 import { useMessage } from "@/components/message-provider";
 import { writeCurrentTask } from "@/lib/current-task";
+import { apiFetch } from "@/lib/http-client";
 
 type MaintenanceAction = "clear-dictionaries" | "clear-snapshots" | "reset-system";
 
@@ -95,7 +96,7 @@ export default function SettingsPage() {
   async function execute(item: MaintenanceItem) {
     setBusyAction(item.action);
     try {
-      const response = await fetch("/api/settings/maintenance", {
+      const response = await apiFetch("/api/settings/maintenance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

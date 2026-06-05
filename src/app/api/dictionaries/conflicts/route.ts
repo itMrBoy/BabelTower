@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { detectConflicts } from "@/domain/conflict/conflict-detector";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import { getLocalDictionaryEntriesForConflict, isDatabaseUnavailable } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import { dictionaryToStandardEntry } from "@/lib/standard";
@@ -13,6 +14,8 @@ function parseLimit(value: string | null) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
   const { searchParams } = new URL(request.url);
   const limit = parseLimit(searchParams.get("limit"));
   const body = await request.json();

@@ -3,6 +3,7 @@ import { ConflictSeverity, ConflictType, FileFormat, Prisma, SnapshotKind, TaskM
 import { detectConflicts } from "@/domain/conflict/conflict-detector";
 import type { StandardI18nDocument } from "@/domain/standard-i18n/types";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import {
   createLocalImportTask,
   getLocalDictionaryEntriesForConflict,
@@ -44,6 +45,9 @@ function parseFailureDetails(fileName: string, error: unknown) {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId") ?? undefined;
   const status = searchParams.get("status") ?? undefined;
@@ -53,6 +57,10 @@ export async function GET(request: NextRequest) {
       where: {
         projectId,
         status: status ? (status as TaskStatus) : historyOnly ? TaskStatus.READ_ONLY_HISTORY : undefined,
+        OR: [
+          { status: { not: TaskStatus.DRAFT } },
+          { createdById: currentUser.id },
+        ],
       },
       include: {
         project: {
@@ -67,13 +75,19 @@ export async function GET(request: NextRequest) {
     return ok({ items });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
-      return ok({ items: listLocalTasks({ projectId, status, historyOnly }), localFallback: true });
+      const items = listLocalTasks({ projectId, status, historyOnly }).filter(
+        (task) => task.status !== "DRAFT" || task.createdById === currentUser.id,
+      );
+      return ok({ items, localFallback: true });
     }
     return fail("task list failed", 500, error instanceof Error ? error.message : String(error));
   }
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const form = await request.formData();
   const sourceFile = form.get("sourceFile") as File | null;
   const targetFile = form.get("targetFile") as File | null;
@@ -159,6 +173,7 @@ export async function POST(request: NextRequest) {
           targetFilename: targetFile?.name ?? null,
           status: TaskStatus.DRAFT,
           latestVersion: 1,
+          createdById: currentUser.id,
         },
       });
 
@@ -170,6 +185,7 @@ export async function POST(request: NextRequest) {
           standardDocuments: { source: document, target: targetDocument ?? null } as unknown as Prisma.InputJsonValue,
           previewRows: previewRows as unknown as Prisma.InputJsonValue,
           conflictSummary: summary as unknown as Prisma.InputJsonValue,
+          createdById: currentUser.id,
         },
       });
 
@@ -244,6 +260,7 @@ export async function POST(request: NextRequest) {
         previewRows,
         conflictSummary,
         summary,
+        createdById: currentUser.id,
       });
       return ok({ task, latestSnapshot, previewRows, conflictSummary: summary, dictionaryHits, localFallback: true }, 201);
     } catch (localError) {

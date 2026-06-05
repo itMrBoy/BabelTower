@@ -9,6 +9,7 @@ import {
   RefreshCwIcon,
 } from "@/components/icons";
 import { readCurrentTask, subscribeCurrentTask, writeCurrentTask } from "@/lib/current-task";
+import { apiFetch } from "@/lib/http-client";
 import { useMessage } from "@/components/message-provider";
 
 interface Task {
@@ -127,7 +128,7 @@ export default function SnapshotsPage() {
   const loadTasks = useCallback(async () => {
     setLoadingTasks(true);
         try {
-      const response = await fetch("/api/tasks");
+      const response = await apiFetch("/api/tasks");
       const body = await readJson<{ items?: Task[]; error?: { message?: string } }>(response);
       if (!response.ok) {
         throw new Error(body.error?.message ?? `请求失败 (HTTP ${response.status})`);
@@ -144,7 +145,7 @@ export default function SnapshotsPage() {
   const loadHistory = useCallback(async (taskId: string) => {
     setLoadingHistory(true);
         try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/history?limit=50`);
+      const response = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/history?limit=50`);
       const body = await readJson<{ items?: Snapshot[]; error?: { message?: string } }>(response);
       if (!response.ok) {
         throw new Error(body.error?.message ?? `请求失败 (HTTP ${response.status})`);

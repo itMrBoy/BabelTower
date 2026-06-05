@@ -11,6 +11,7 @@ import {
   RefreshCwIcon,
 } from "@/components/icons";
 import { readCurrentTask, subscribeCurrentTask, writeCurrentTask, type CurrentTask } from "@/lib/current-task";
+import { apiFetch } from "@/lib/http-client";
 import { useMessage } from "@/components/message-provider";
 
 type ConflictType = "exact_zh_diff_target" | "high_similarity" | "duplicate_key" | "format_parse_error";
@@ -179,7 +180,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const response = await apiFetch(input, init);
   const body = await readJson<T & { error?: { message?: string }; message?: string }>(response);
   if (!response.ok) {
     throw new Error(body.error?.message ?? body.message ?? `Request failed with status ${response.status}`);
@@ -249,7 +250,7 @@ export default function ConflictsPage() {
     setLoading(true);
     try {
       // 1) Get the latest snapshot for the current task.
-      const historyResp = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/history?latestOnly=true&includeRows=true`);
+      const historyResp = await apiFetch(`/api/tasks/${encodeURIComponent(task.id)}/history?latestOnly=true&includeRows=true`);
       const historyBody = await readJson<{ items?: Snapshot[]; error?: { message?: string } }>(historyResp);
       if (!historyResp.ok) {
         throw new Error(historyBody.error?.message ?? `History 请求失败 (HTTP ${historyResp.status})`);
@@ -299,7 +300,7 @@ export default function ConflictsPage() {
         detail: "解析后的叶子值不是合法字符串 (UNSUPPORTED_VALUE)，需要在源文件修正后重新导入。",
       }));
 
-      const conflictResp = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/conflicts?unresolvedOnly=true`);
+      const conflictResp = await apiFetch(`/api/tasks/${encodeURIComponent(task.id)}/conflicts?unresolvedOnly=true`);
       const conflictBody = await readJson<{
         items?: ApiConflictItem[];
         error?: { message?: string };

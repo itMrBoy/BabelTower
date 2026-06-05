@@ -3,6 +3,7 @@ import { buildDualExportFiles } from "@/domain/exporter/export-files";
 import { validateDocument } from "@/domain/persistence/save-service";
 import type { PreviewRow, StandardI18nDocument } from "@/domain/standard-i18n/types";
 import { fail, ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import { getLocalSnapshot, getLocalTask, isDatabaseUnavailable } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import { draftRowsToPreviewRows, rowsToDocument } from "@/lib/standard";
@@ -14,6 +15,9 @@ function validateTranslatedRows(rows: PreviewRow[]) {
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const { taskId } = await context.params;
   const body = await request.json();
   const snapshotVersion = Number(body.snapshotVersion);
@@ -22,9 +26,21 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
   try {
     const snapshot = await prisma.taskSnapshot.findUnique({
       where: { taskId_version: { taskId, version: snapshotVersion } },
-      include: { task: { select: { targetFilename: true } } },
+      include: {
+        task: {
+          select: {
+            targetFilename: true,
+            status: true,
+            isEditable: true,
+            createdById: true,
+          },
+        },
+      },
     });
     if (!snapshot) return fail("snapshot not found", 404);
+    if (snapshot.task.status === "DRAFT" && snapshot.task.isEditable && snapshot.task.createdById !== currentUser.id) {
+      return fail("snapshot not found", 404);
+    }
 
     const docs = snapshot.standardDocuments as { source?: StandardI18nDocument } | null;
     const draftRows = await prisma.taskDraftRow.findMany({ where: { taskId }, orderBy: { rowIndex: "asc" } });
@@ -46,6 +62,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     const snapshot = getLocalSnapshot(taskId, snapshotVersion);
     const task = getLocalTask(taskId);
     if (!snapshot) return fail("snapshot not found", 404);
+    if (task?.status === "DRAFT" && task.isEditable && task.createdById !== currentUser.id) {
+      return fail("snapshot not found", 404);
+    }
     const docs = snapshot.standardDocuments;
     const rows = snapshot.previewRows;
     if (!docs.source) return fail("source document missing", 422);

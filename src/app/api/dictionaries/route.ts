@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ConflictSeverity, ConflictType } from "@prisma/client";
 import { detectConflicts } from "@/domain/conflict/conflict-detector";
 import { fail, ok, parseLimit } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 import {
   clearDictionaryQueryCache,
   dictionaryQueryCacheKey,
@@ -41,6 +42,8 @@ function toResponse(entry: {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
   if (!q) return fail("query parameter q is required", 400);
@@ -89,6 +92,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const currentUser = auth.user;
   const body = await request.json();
   const chineseText = String(body.chineseText ?? "").trim();
   const englishText = String(body.englishText ?? "").trim();
@@ -142,6 +148,7 @@ export async function POST(request: NextRequest) {
         normalizedEnglish: normalizeText(englishText),
         tags: Array.isArray(body.tags) ? body.tags : [],
         note: body.note ?? null,
+        updatedById: currentUser.id,
       },
       create: {
         chineseText,
@@ -151,6 +158,8 @@ export async function POST(request: NextRequest) {
         normalizedEnglish: normalizeText(englishText),
         tags: Array.isArray(body.tags) ? body.tags : [],
         note: body.note ?? null,
+        createdById: currentUser.id,
+        updatedById: currentUser.id,
       },
     });
 
@@ -160,7 +169,7 @@ export async function POST(request: NextRequest) {
         previousEnglish: existing?.englishText ?? null,
         nextEnglish: englishText,
         reason: body.reason ?? "manual dictionary write",
-        changedById: body.changedById ?? null,
+        changedById: currentUser.id,
       },
     });
 
@@ -215,6 +224,7 @@ export async function POST(request: NextRequest) {
       englishText,
       tags: Array.isArray(body.tags) ? body.tags : [],
       note: body.note ?? null,
+      userId: currentUser.id,
     });
     clearDictionaryQueryCache();
     return ok({ entry: toResponse(entry), conflictSummary, localFallback: true }, existed ? 200 : 201);

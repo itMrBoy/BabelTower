@@ -25,8 +25,24 @@ metadata:
 | `ConflictType` | `DUPLICATE_IDENTICAL`, `EXACT_CHINESE_DIFF_ENGLISH`, `SIMILAR_CHINESE` | 冲突类型 |
 | `ConflictSeverity` | `INFO`, `WARNING`, `BLOCKING` | 冲突严重程度 |
 | `ConflictResolution` | `UNRESOLVED`, `KEEP_EXISTING`, `UPDATE_DICTIONARY`, `IGNORE_SIMILAR`, `EDIT_ROW` | 冲突解决方式 |
+| `UserRole` | `ADMIN`, `MAINTAINER` | 后台账号角色 |
 
 ## 核心模型
+
+### User（用户表）
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | UUID | PK | 主键 |
+| `username` | VarChar(64) | **UQ** | 登录账号 |
+| `passwordHash` | Text | - | PBKDF2-SHA256 密码哈希 |
+| `role` | UserRole | `@default(MAINTAINER)` | `ADMIN` 或 `MAINTAINER` |
+| `isActive` | Boolean | `@default(true)` | 禁用用户不能登录，旧 token 下次请求失效 |
+| `tokenVersion` | Int | `@default(1)` | 强制旧 token 失效的版本号 |
+| `createdAt` | DateTime | `@default(now())` | 创建时间 |
+| `updatedAt` | DateTime | `@updatedAt` | 更新时间 |
+
+内置管理员通过 `prisma/seed.mjs` 初始化：`admin / Snow@123`。用户删除是受限硬删除：存在项目、任务、快照、字典、修订或冲突等审计关联时返回 409，改用禁用保留审计链。
 
 ### Dictionary（字典表）
 
@@ -43,8 +59,8 @@ metadata:
 | `tags` | String[] | `@default([])` | 标签数组 |
 | `note` | Text? | - | 备注 |
 | `usageCount` | Int | `@default(0)` | 使用次数 |
-| `createdById` | UUID? | - | 创建者（始终 null） |
-| `updatedById` | UUID? | - | 更新者（始终 null） |
+| `createdById` | UUID? | - | 创建者（后端当前登录用户） |
+| `updatedById` | UUID? | - | 更新者（后端当前登录用户） |
 | `createdAt` | DateTime | `@default(now())` | 创建时间 |
 | `updatedAt` | DateTime | `@updatedAt` | 更新时间 |
 
@@ -143,6 +159,8 @@ metadata:
 **索引**: `task_draft_rows_task_row_index_idx` on `(taskId, rowIndex)`
 
 草稿行用于保存 DRAFT 任务的用户编辑。创建快照/验证/导出/保存时优先读取草稿行，无草稿时回退到最新快照的 `previewRows`。
+
+**可见性**：`DRAFT` 任务、草稿行和暂存快照仅 `TranslationTask.createdById` 对应用户可读写；管理员也不越权读取。非 `DRAFT` 已保存数据对登录用户共享可见。
 
 ### TaskSnapshot（任务快照）
 
@@ -313,6 +331,7 @@ translationTask.update()       [dictionarySyncedAt=new Date()]
 
 ```typescript
 type LocalStore = {
+  users: LocalUser[];
   projects: LocalProject[];
   tasks: LocalTask[];
   snapshots: LocalSnapshot[];

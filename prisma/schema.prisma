@@ -53,6 +53,25 @@ enum ConflictResolution {
   EDIT_ROW
 }
 
+enum UserRole {
+  ADMIN
+  MAINTAINER
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(64)
+  passwordHash String   @map("password_hash") @db.Text
+  role         UserRole @default(MAINTAINER)
+  isActive     Boolean  @default(true) @map("is_active")
+  tokenVersion Int      @default(1) @map("token_version")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([role, isActive], map: "users_role_active_idx")
+  @@map("users")
+}
+
 model Dictionary {
   id                String               @id @default(uuid()) @db.Uuid
   chineseText       String               @unique(map: "dictionary_chinese_text_uq") @map("chinese_text") @db.Text
