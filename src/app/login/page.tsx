@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { useMessage } from "@/components/message-provider";
+import { PasswordInput } from "@/components/password-input";
 import { requestJson } from "@/lib/http-client";
 
 export default function LoginPage() {
@@ -59,9 +60,8 @@ export default function LoginPage() {
         </label>
         <label className="mb-5 block text-sm text-slate-600">
           密码
-          <input
+          <PasswordInput
             className="mt-1"
-            type="password"
             value={password}
             placeholder="请输入密码"
             onChange={(event) => setPassword(event.target.value)}

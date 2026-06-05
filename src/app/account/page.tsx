@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useMessage } from "@/components/message-provider";
+import { PasswordInput } from "@/components/password-input";
 import { requestJson } from "@/lib/http-client";
 
 export default function AccountPage() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, logout } = useAuth();
   const message = useMessage();
   const [username, setUsername] = useState(user?.username ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -26,11 +27,16 @@ export default function AccountPage() {
         }),
       });
       if (password) {
-        message.success("密码已修改，请重新登录。");
-      } else {
-        await refresh();
-        message.success("账号信息已更新。");
+        // 改密后端已使当前会话 Cookie 失效，前端须立即登出并跳转登录页，
+        // 否则停留在原页面会造成「看似已登录、实际所有请求 401」的错觉。
+        setCurrentPassword("");
+        setPassword("");
+        message.success("密码已修改，请使用新密码重新登录。");
+        await logout();
+        return;
       }
+      await refresh();
+      message.success("账号信息已更新。");
       setCurrentPassword("");
       setPassword("");
     } catch (error) {
@@ -52,9 +58,8 @@ export default function AccountPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="text-sm text-slate-600">
               当前密码
-              <input
+              <PasswordInput
                 className="mt-1"
-                type="password"
                 value={currentPassword}
                 onChange={(event) => setCurrentPassword(event.target.value)}
                 autoComplete="current-password"
@@ -62,9 +67,8 @@ export default function AccountPage() {
             </label>
             <label className="text-sm text-slate-600">
               新密码
-              <input
+              <PasswordInput
                 className="mt-1"
-                type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="new-password"
