@@ -15,6 +15,10 @@ import { prisma } from "@/lib/prisma";
 export const AUTH_COOKIE = "babeltower_session";
 export const SESSION_TTL_SECONDS = 8 * 60 * 60;
 
+// 进程内用户状态缓存存活时间。clearUserStateCache 仍会在写操作（封禁/改密）时即时失效；
+// 此 TTL 仅为兜底，防止绕过 API 直接改库导致缓存长期陈旧。设 0 则每次都查库。
+export const USER_STATE_CACHE_TTL_MS = Number(process.env.USER_STATE_CACHE_TTL_MS ?? 60_000);
+
 export type CurrentUser = {
   id: string;
   username: string;
@@ -124,18 +128,25 @@ function cookieFromHeader(request: Request, name: string) {
 
 async function readUserState(userId: string) {
   const cached = userCache().get(userId);
-  if (cached) return cached;
+  // 命中也要判 TTL：过期则 fall through 重新查库，避免缓存长期陈旧（如绕过 API 直改 DB）。
+  if (cached && Date.now() - cached.cachedAt < USER_STATE_CACHE_TTL_MS) return cached;
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, username: true, role: true, isActive: true, tokenVersion: true },
     });
-    if (!user) return null;
+    if (!user) {
+      // 用户已被删除：清掉残留缓存条目，避免旧值继续命中。
+      userCache().delete(userId);
+      return null;
+    }
     const state: CachedUserState = { ...user, cachedAt: Date.now() };
     userCache().set(user.id, state);
     return state;
   } catch (error) {
     if (!isDatabaseUnavailable(error)) throw error;
+    // 降级分支不写入 userCache()：local-store 是单进程内存权威源、本就实时；
+    // 若写进主缓存，DB 恢复后会在 TTL 内继续读到陈旧的 local 状态。
     seedLocalAdmin();
     const user = getLocalUserById(userId);
     if (!user) return null;
