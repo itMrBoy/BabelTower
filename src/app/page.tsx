@@ -10,6 +10,7 @@ import {
 } from "@/lib/export-validation";
 import { apiFetch } from "@/lib/http-client";
 import { useMessage } from "@/components/message-provider";
+import ConfirmPopover from "@/components/confirm-popover";
 
 type Project = {
   id: string;
@@ -525,9 +526,6 @@ export default function Home() {
     if (!selectedProjectId) return;
     const matched = projects.find((project) => project.id === selectedProjectId);
     const label = matched?.name ?? projectName;
-    if (!window.confirm(`确定删除项目「${label}」吗？该项目下的任务、快照、草稿和冲突记录也会被删除，字典数据不会删除。`)) {
-      return;
-    }
 
     setBusy("deleteProject");
     try {
@@ -977,9 +975,23 @@ export default function Home() {
                   {busy === "createProject" ? "保存中..." : selectedProjectId ? "更新项目" : "保存项目"}
                 </button>
                 {selectedProjectId ? (
-                  <button className="ghost danger project-delete" type="button" disabled={busy === "deleteProject"} onClick={deleteProject}>
-                    {busy === "deleteProject" ? "删除中..." : "删除"}
-                  </button>
+                  <ConfirmPopover
+                    title={
+                      <>
+                        确定删除项目「
+                        {projects.find((project) => project.id === selectedProjectId)?.name ?? projectName}
+                        」吗？该项目下的任务、快照、草稿和冲突记录也会被删除，字典数据不会删除。
+                      </>
+                    }
+                    confirmText="删除"
+                    tone="danger"
+                    disabled={busy === "deleteProject"}
+                    onConfirm={deleteProject}
+                  >
+                    <button className="ghost danger project-delete" type="button" disabled={busy === "deleteProject"}>
+                      {busy === "deleteProject" ? "删除中..." : "删除"}
+                    </button>
+                  </ConfirmPopover>
                 ) : null}
               </div>
             </div>

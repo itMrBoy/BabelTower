@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api";
 import { clearUserStateCache, requireAdmin } from "@/lib/auth";
 import {
-  countLocalActiveAdmins,
   deleteLocalUser,
   getLocalUserById,
   isDatabaseUnavailable,
@@ -40,12 +39,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ u
   try {
     const target = await prisma.user.findUnique({ where: { id: userId } });
     if (!target) return fail("用户不存在", 404);
-    if (target.role === "ADMIN" && target.isActive && !isActive) {
-      const otherAdmins = await prisma.user.count({
-        where: { id: { not: userId }, role: "ADMIN", isActive: true },
-      });
-      if (otherAdmins === 0) return fail("系统至少需要保留一个可用管理员", 400);
-    }
+    if (target.role === "ADMIN" && !isActive) return fail("管理员账号不允许禁用", 403);
     const updated = await prisma.user.update({
       where: { id: userId },
       data: { isActive, tokenVersion: { increment: 1 } },
@@ -58,9 +52,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ u
     }
     const target = getLocalUserById(userId);
     if (!target) return fail("用户不存在", 404);
-    if (target.role === "ADMIN" && target.isActive && !isActive && countLocalActiveAdmins(userId) === 0) {
-      return fail("系统至少需要保留一个可用管理员", 400);
-    }
+    if (target.role === "ADMIN" && !isActive) return fail("管理员账号不允许禁用", 403);
     const updated = setLocalUserActive(userId, isActive);
     if (!updated) return fail("用户不存在", 404);
     clearUserStateCache(userId);
@@ -75,6 +67,9 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   if (userId === auth.user.id) return fail("不能删除当前登录用户", 400);
 
   try {
+    const target = await prisma.user.findUnique({ where: { id: userId } });
+    if (!target) return fail("用户不存在", 404);
+    if (target.role === "ADMIN") return fail("管理员账号不允许删除", 403);
     const usage = {
       projects: await prisma.productProject.count({ where: { createdById: userId } }),
       tasks: await prisma.translationTask.count({ where: { createdById: userId } }),
@@ -97,6 +92,9 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       return fail(message.includes("Record to delete does not exist") ? "用户不存在" : "用户删除失败", message.includes("Record to delete does not exist") ? 404 : 500, message);
     }
     try {
+      const localTarget = getLocalUserById(userId);
+      if (!localTarget) return fail("用户不存在", 404);
+      if (localTarget.role === "ADMIN") return fail("管理员账号不允许删除", 403);
       const deleted = deleteLocalUser(userId);
       if (!deleted) return fail("用户不存在", 404);
       clearUserStateCache(userId);
