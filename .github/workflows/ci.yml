@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 env:
-  # npm ci runs package postinstall -> prisma generate; it needs DATABASE_URL to exist,
-  # but validation/generation do not connect to this placeholder database.
+  # pnpm install 会触发 postinstall -> prisma generate，需要 DATABASE_URL 存在，
+  # 但校验/生成阶段不会真正连接这个占位数据库。
   DATABASE_URL: "postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 
 jobs:
@@ -18,12 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run lint
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
 
   # 2. TypeScript 类型检查
   typecheck:
@@ -31,13 +32,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run typecheck
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm typecheck
         # 前端类型错误会在此步骤暴露
 
   # 3. Prisma Schema 校验
@@ -46,12 +48,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm ci
-      - run: npx prisma validate
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma validate
         # 数据库模型问题会在此步骤暴露
 
   # 4. OpenAPI 契约校验
@@ -60,12 +63,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm ci
-      - run: npx @redocly/cli lint openapi/babeltower.v1.yaml
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm openapi:validate
         # API 契约问题会在此步骤暴露
 
   # 5. 单元测试
@@ -88,13 +92,14 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm test
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm test
         env:
           DATABASE_URL: "postgresql://babeltower:babeltower@localhost:5432/babeltower_test?schema=public"
         # 解析器、冲突检测、API 逻辑错误会在此步骤暴露
@@ -105,13 +110,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run build
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm build
         env:
           # prisma generate / next build 需要变量存在，连接性不要求
           DATABASE_URL: "postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
