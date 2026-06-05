@@ -1,8 +1,12 @@
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { pbkdf2, randomBytes, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 
 const ITERATIONS = 120000;
 const KEY_LENGTH = 32;
 const DIGEST = "sha256";
+
+// 异步 pbkdf2 走 libuv 线程池，避免高迭代哈希阻塞 Node 单线程事件循环。
+const pbkdf2Async = promisify(pbkdf2);
 
 export function validatePasswordStrength(password: string) {
   if (password.length < 6) return "密码至少 6 位";
@@ -13,21 +17,19 @@ export function validatePasswordStrength(password: string) {
   return null;
 }
 
-export function hashPassword(password: string) {
+export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
-  const hash = pbkdf2Sync(password, salt, ITERATIONS, KEY_LENGTH, DIGEST).toString("hex");
-  return `pbkdf2_sha256$${ITERATIONS}$${salt}$${hash}`;
+  const derived = await pbkdf2Async(password, salt, ITERATIONS, KEY_LENGTH, DIGEST);
+  return `pbkdf2_sha256$${ITERATIONS}$${salt}$${derived.toString("hex")}`;
 }
 
-export function verifyPassword(password: string, passwordHash: string) {
+export async function verifyPassword(password: string, passwordHash: string) {
   const [algorithm, iterationsRaw, salt, expectedHash] = passwordHash.split("$");
   if (algorithm !== "pbkdf2_sha256" || !iterationsRaw || !salt || !expectedHash) return false;
   const iterations = Number(iterationsRaw);
   if (!Number.isFinite(iterations) || iterations <= 0) return false;
-  const actual = Buffer.from(
-    pbkdf2Sync(password, salt, iterations, KEY_LENGTH, DIGEST).toString("hex"),
-    "hex",
-  );
+  const derived = await pbkdf2Async(password, salt, iterations, KEY_LENGTH, DIGEST);
+  const actual = Buffer.from(derived.toString("hex"), "hex");
   const expected = Buffer.from(expectedHash, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

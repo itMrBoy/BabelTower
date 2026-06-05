@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   const user = await findLoginUser(username);
   if (!user) return fail("用户名或密码错误", 401);
   if (!user.isActive) return fail("账号已禁用，请联系管理员", 403);
-  if (!verifyPassword(password, user.passwordHash)) return fail("用户名或密码错误", 401);
+  if (!(await verifyPassword(password, user.passwordHash))) return fail("用户名或密码错误", 401);
 
   const response = NextResponse.json({
     user: {

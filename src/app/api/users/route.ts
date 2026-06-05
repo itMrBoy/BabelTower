@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
   const username = String(body.username ?? "").trim();
   if (!username) return fail("用户名不能为空", 400);
   const password = randomPassword();
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPassword(password);
   try {
     const user = await prisma.user.create({
       data: { username, passwordHash, role: UserRole.MAINTAINER },

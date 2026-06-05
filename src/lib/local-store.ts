@@ -1,4 +1,4 @@
-import { pbkdf2Sync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   ConflictItem,
   ConflictSummary,
@@ -163,12 +163,12 @@ function now() {
   return new Date();
 }
 
-function hashLocalAdminPassword() {
-  // Same format as src/lib/password.ts; duplicated here to avoid importing server auth helpers into fallback state.
-  const salt = "babeltower-local-admin";
-  const hash = pbkdf2Sync("Snow@123", salt, 120000, 32, "sha256").toString("hex");
-  return `pbkdf2_sha256$120000$${salt}$${hash}`;
-}
+// 内置 admin（admin / Snow@123）固定盐哈希。预计算为常量，避免每次降级 seed 时同步跑 12 万次
+// PBKDF2 阻塞事件循环。生成命令：
+//   node -e "const{pbkdf2Sync}=require('crypto');console.log(pbkdf2Sync('Snow@123','babeltower-local-admin',120000,32,'sha256').toString('hex'))"
+// Same format as src/lib/password.ts; 此处保持常量化，不导入 server auth helpers。
+const LOCAL_ADMIN_PASSWORD_HASH =
+  "pbkdf2_sha256$120000$babeltower-local-admin$09e0e897dfb35d257c5e830ce83e909e4dfe4ceaa6ceddcc2ee85852948197c6";
 
 export function seedLocalAdmin() {
   const state = store();
@@ -182,7 +182,7 @@ export function seedLocalAdmin() {
   const user: LocalUser = {
     id: randomUUID(),
     username: "admin",
-    passwordHash: hashLocalAdminPassword(),
+    passwordHash: LOCAL_ADMIN_PASSWORD_HASH,
     role: "ADMIN",
     isActive: true,
     tokenVersion: 1,

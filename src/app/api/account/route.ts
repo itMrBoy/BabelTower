@@ -28,15 +28,16 @@ export async function PATCH(request: NextRequest) {
   try {
     const user = await prisma.user.findUnique({ where: { id: currentUser.id } });
     if (!user) return fail("用户不存在", 404);
-    if (nextPassword && !verifyPassword(currentPassword, user.passwordHash)) {
+    if (nextPassword && !(await verifyPassword(currentPassword, user.passwordHash))) {
       return fail("当前密码错误", 400);
     }
+    const nextPasswordHash = nextPassword ? await hashPassword(nextPassword) : null;
     const updated = await prisma.user.update({
       where: { id: currentUser.id },
       data: {
         ...(username ? { username } : {}),
-        ...(nextPassword
-          ? { passwordHash: hashPassword(nextPassword), tokenVersion: { increment: 1 } }
+        ...(nextPasswordHash
+          ? { passwordHash: nextPasswordHash, tokenVersion: { increment: 1 } }
           : {}),
       },
       select: { id: true, username: true, role: true },
@@ -52,12 +53,12 @@ export async function PATCH(request: NextRequest) {
     }
     const localUser = getLocalUserById(currentUser.id);
     if (!localUser) return fail("用户不存在", 404);
-    if (nextPassword && !verifyPassword(currentPassword, localUser.passwordHash)) {
+    if (nextPassword && !(await verifyPassword(currentPassword, localUser.passwordHash))) {
       return fail("当前密码错误", 400);
     }
     const updated = updateLocalAccount(currentUser.id, {
       ...(username ? { username } : {}),
-      ...(nextPassword ? { passwordHash: hashPassword(nextPassword) } : {}),
+      ...(nextPassword ? { passwordHash: await hashPassword(nextPassword) } : {}),
     });
     if (!updated) return fail("用户不存在", 404);
     clearUserStateCache(currentUser.id);
