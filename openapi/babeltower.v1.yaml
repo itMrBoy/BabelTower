@@ -5,19 +5,44 @@ info:
   description: |
     BabelTower i18n dictionary and translation task API.
     All import and save workflows follow: Input (File) -> Parser -> Standard JSON -> Conflict Check -> Database.
+
+    ## 鉴权
+    业务接口通过 HttpOnly Cookie `babeltower_session` 鉴权（HMAC-SHA256 签名的会话 token，默认有效期 8 小时）。
+    登录成功后服务端下发该 Cookie，后续请求自动携带。除 `getHealth`、`login`、`logout`、`getCurrentUser`
+    之外的接口默认要求登录（`security` 全局生效）；用户管理与系统维护接口额外要求 `ADMIN` 角色（鉴权层面仍是同一 Cookie，
+    OpenAPI 无法表达角色，已在各接口描述中标注）。
+
+    ## 统一响应格式
+    成功响应统一包裹 `requestId`：`{ ...data, requestId }`。
+    错误响应：`{ error: { message, details? }, requestId }`。
+    数据库不可用时降级到本地存储，成功响应额外带 `localFallback: true`。
 servers:
   - url: /api
     description: Next.js Route Handlers base path
 tags:
+  - name: Auth
+    description: 登录、登出、当前用户与账号设置
+  - name: Users
+    description: 用户管理（ADMIN）
   - name: Dictionary
+    description: 字典搜索、写入与冲突检测
   - name: Projects
+    description: 产品项目管理
   - name: Tasks
+    description: 翻译任务导入、编辑、快照、校验与保存
   - name: Export
+    description: 任务文件导出
+  - name: System
+    description: 健康检查与系统维护
+security:
+  - cookieAuth: []
 paths:
   /health:
     get:
+      tags: [System]
       operationId: getHealth
       summary: Health check
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -32,6 +57,339 @@ paths:
                     const: ok
                   requestId:
                     type: string
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in with username and password
+      description: 成功后写入 HttpOnly Cookie `babeltower_session`。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  minLength: 1
+                password:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserResponse"
+        "400":
+          description: Username or password missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Wrong username or password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Log out and clear the session cookie
+      security: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, requestId]
+                properties:
+                  ok:
+                    type: boolean
+                    const: true
+                  requestId:
+                    type: string
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Get the current logged-in user
+      description: 通过 Cookie 被动校验会话；无有效会话返回 401。
+      security: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /account:
+    patch:
+      tags: [Auth]
+      operationId: updateAccount
+      summary: Update current user's username and/or password
+      description: |
+        修改密码需同时提供 `currentPassword` 与 `password`；修改密码后会清除会话 Cookie，需要重新登录。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  minLength: 1
+                currentPassword:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserResponse"
+        "400":
+          description: Empty username, weak password, missing or wrong current password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List users (ADMIN only)
+      description: 需要 `ADMIN` 角色。
+      parameters:
+        - name: username
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: isActive
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, requestId]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Users]
+      operationId: createUser
+      summary: Create a MAINTAINER user (ADMIN only)
+      description: 需要 `ADMIN` 角色。返回一次性随机初始密码。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  minLength: 1
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, password, requestId]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                  password:
+                    type: string
+                    description: 一次性随机初始密码，仅在创建时返回
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: Empty username
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /users/{userId}:
+    patch:
+      tags: [Users]
+      operationId: setUserActive
+      summary: Enable or disable a user (ADMIN only)
+      description: 需要 `ADMIN` 角色。禁用 ADMIN 账号或当前登录用户会被拒绝。
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isActive]
+              properties:
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, requestId]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: Cannot disable the current logged-in user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not ADMIN, or attempting to disable a protected ADMIN account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Users]
+      operationId: deleteUser
+      summary: Delete a user without business data (ADMIN only)
+      description: 需要 `ADMIN` 角色。删除 ADMIN 账号或当前登录用户会被拒绝；有业务数据的用户不可删除（返回 409）。
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, user, requestId]
+                properties:
+                  deleted:
+                    type: boolean
+                    const: true
+                  user:
+                    $ref: "#/components/schemas/User"
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: Cannot delete the current logged-in user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not ADMIN, or attempting to delete a protected ADMIN account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: User has business data and cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /dictionaries:
     get:
       tags: [Dictionary]
@@ -66,11 +424,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DictionarySearchResponse"
+        "400":
+          description: Missing required query parameter q
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Dictionary]
       operationId: createDictionaryEntry
-      summary: Create a dictionary entry after conflict check
-      description: Blocking conflicts return 409 and must be resolved before writing Dictionary.
+      summary: Create or update a dictionary entry after conflict check
+      description: "中文哈希命中已有条目且英文不同时，未携带 resolution=UPDATE_DICTIONARY 返回 409。"
       requestBody:
         required: true
         content:
@@ -78,23 +444,47 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateDictionaryRequest"
       responses:
+        "200":
+          description: Dictionary entry updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DictionaryEntryResponse"
         "201":
           description: Dictionary entry created
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/DictionaryEntryResponse"
-        "409":
-          description: Conflict must be resolved before writing dictionary
+        "400":
+          description: Missing chineseText or englishText
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConflictCheckResponse"
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Exact Chinese conflict with different English must be resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DictionaryConflictResponse"
+
   /dictionaries/conflicts:
     post:
       tags: [Dictionary]
       operationId: checkDictionaryConflicts
-      summary: Check exact and similar Chinese conflicts before dictionary writes
+      summary: Check conflicts for a batch of standard i18n entries
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 1000
       requestBody:
         required: true
         content:
@@ -108,6 +498,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConflictCheckResponse"
+        "400":
+          description: Missing entries array
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /projects:
     get:
       tags: [Projects]
@@ -138,8 +537,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Project"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Projects]
       operationId: createProject
@@ -150,29 +553,116 @@ paths:
           application/json:
             schema:
               type: object
-              required: [code, name]
+              required: [name]
               properties:
-                code:
-                  type: string
-                  example: web-console
                 name:
                   type: string
+                  minLength: 1
                   example: Web Console
                 description:
-                  type: string
+                  type: [string, "null"]
       responses:
+        "200":
+          description: Project already existed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMutationResponse"
         "201":
           description: Project created
           content:
             application/json:
               schema:
+                $ref: "#/components/schemas/ProjectMutationResponse"
+        "400":
+          description: name is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /projects/{projectId}:
+    patch:
+      tags: [Projects]
+      operationId: updateProject
+      summary: Update a product project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                description:
+                  type: [string, "null"]
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMutationResponse"
+        "400":
+          description: name is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Project name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      summary: Delete a product project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project deleted
+          content:
+            application/json:
+              schema:
                 type: object
-                required: [project, requestId]
+                required: [deleted, requestId]
                 properties:
+                  deleted:
+                    type: boolean
+                    const: true
                   project:
                     $ref: "#/components/schemas/Project"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /projects/{projectId}/current-task:
     get:
       tags: [Projects, Tasks]
@@ -193,8 +683,13 @@ paths:
                     oneOf:
                       - $ref: "#/components/schemas/TranslationTask"
                       - type: "null"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /tasks:
     get:
       tags: [Tasks]
@@ -227,9 +722,13 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/TranslationTask"
+                      $ref: "#/components/schemas/TaskListItem"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Tasks]
       operationId: importTaskFiles
@@ -237,14 +736,14 @@ paths:
       description: |
         Canonical import pipeline:
         Input (File) -> Parser -> Standard JSON -> Conflict Check -> Database.
-        It creates a TranslationTask and an IMPORTED TaskSnapshot.
+        It creates a DRAFT TranslationTask and an IMPORTED TaskSnapshot.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [projectId, name, mode, format, sourceFile]
+              required: [projectId, name, sourceFile]
               properties:
                 projectId:
                   type: string
@@ -278,16 +777,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/TaskImportResponse"
         "400":
-          description: Invalid file pair, parser error, or key mismatch that prevents preview
+          description: Missing file or fields, parser error, or key mismatch
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /tasks/{taskId}:
     get:
       tags: [Tasks]
       operationId: getTask
-      summary: Get task with latest snapshot
+      summary: Get task with latest snapshot and preview rows
       parameters:
         - $ref: "#/components/parameters/TaskId"
       responses:
@@ -297,19 +799,39 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [task, latestSnapshot, requestId]
+                required: [task, latestSnapshot, previewRows, requestId]
                 properties:
                   task:
                     $ref: "#/components/schemas/TranslationTask"
                   latestSnapshot:
-                    $ref: "#/components/schemas/TaskSnapshot"
+                    oneOf:
+                      - $ref: "#/components/schemas/TaskSnapshot"
+                      - type: "null"
+                  previewRows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PreviewRow"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /tasks/{taskId}/rows:
     patch:
       tags: [Tasks]
       operationId: updateTaskRows
-      summary: Update editable preview rows and create an autosaved snapshot
+      summary: Autosave editable preview rows into draft or official storage
+      description: |
+        乐观锁：`baseVersion` 必须等于 `task.latestVersion`，否则返回 409。
+        DRAFT 任务写入草稿行，SAVED 任务直接写字典。返回的 `target` 表示写入目标。
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -328,24 +850,57 @@ paths:
                   minItems: 1
                   items:
                     $ref: "#/components/schemas/PreviewRowPatch"
+                resolvedConflicts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ResolvedConflictInput"
       responses:
         "200":
-          description: Rows updated and snapshot created
+          description: Rows autosaved
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskSnapshotResponse"
+                type: object
+                required: [currentVersion, target, requestId]
+                properties:
+                  currentVersion:
+                    type: integer
+                  conflictSummary:
+                    $ref: "#/components/schemas/ConflictSummary"
+                  target:
+                    type: string
+                    enum: [draft, official]
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: baseVersion and rows are required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Snapshot version conflict
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/VersionConflictResponse"
+
   /tasks/{taskId}/snapshot:
     post:
       tags: [Tasks]
       operationId: createTaskSnapshot
-      summary: Manually create a draft snapshot
+      summary: Promote the current draft to a SAVED snapshot
+      description: 乐观锁：`baseVersion` 必须等于 `task.latestVersion`。任务必须为 DRAFT 可编辑状态。
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -354,27 +909,54 @@ paths:
           application/json:
             schema:
               type: object
-              required: [baseVersion, previewRows]
+              required: [baseVersion]
               properties:
                 baseVersion:
                   type: integer
                   minimum: 1
-                previewRows:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/PreviewRow"
       responses:
         "200":
           description: Snapshot created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskSnapshotResponse"
+                type: object
+                required: [snapshot, task, requestId]
+                properties:
+                  snapshot:
+                    $ref: "#/components/schemas/TaskSnapshot"
+                  task:
+                    $ref: "#/components/schemas/TranslationTask"
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: baseVersion is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Task not draft editable or snapshot version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionConflictResponse"
+
   /tasks/{taskId}/validate:
     post:
       tags: [Tasks]
       operationId: validateTask
-      summary: Validate task rows before save or export
+      summary: Validate a snapshot before save or export
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -395,11 +977,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationResponse"
+        "400":
+          description: snapshotVersion is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /tasks/{taskId}/save:
     post:
       tags: [Tasks]
       operationId: saveTask
-      summary: Save task and optionally synchronize Dictionary
+      summary: Save task and synchronize Dictionary
+      description: 存在未解决的 BLOCKING 冲突且未提供 resolutions 时返回 409。
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -423,19 +1021,37 @@ paths:
                     $ref: "#/components/schemas/TaskSnapshot"
                   dictionarySync:
                     $ref: "#/components/schemas/DictionarySyncResult"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
-        "409":
-          description: Blocking conflicts are unresolved
+        "400":
+          description: snapshotVersion is required
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConflictCheckResponse"
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Unresolved blocking conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveConflictResponse"
+
   /tasks/{taskId}/export:
     post:
       tags: [Export]
       operationId: exportTask
-      summary: Export zh and en files from a saved or draft snapshot
+      summary: Export zh and en files from a snapshot
+      description: 返回 JSON（文件名到文件内容字符串的映射），非二进制 zip。校验失败返回 422。
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -454,18 +1070,89 @@ paths:
                   example: messages
       responses:
         "200":
-          description: Zip archive containing zh and en files
+          description: Exported files
           content:
-            application/zip:
+            application/json:
               schema:
-                type: string
-                format: binary
+                type: object
+                required: [valid, files, fileBaseName, requestId]
+                properties:
+                  valid:
+                    type: boolean
+                    const: true
+                  files:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: 文件名 -> 文件内容字符串
+                  fileBaseName:
+                    type: string
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: snapshotVersion is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Validation failed and files cannot be exported
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValidationResponse"
+                $ref: "#/components/schemas/ValidationFailedResponse"
+
+  /tasks/{taskId}/conflicts:
+    get:
+      tags: [Tasks]
+      operationId: listTaskConflicts
+      summary: List conflicts attached to a task
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+        - name: unresolvedOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: Task conflict list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, conflictSummary, requestId]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaskConflictRow"
+                  conflictSummary:
+                    $ref: "#/components/schemas/ConflictSummary"
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /tasks/{taskId}/history:
     get:
       tags: [Tasks]
@@ -473,6 +1160,26 @@ paths:
       summary: List task snapshots for restore or read-only history
       parameters:
         - $ref: "#/components/parameters/TaskId"
+        - name: includeRows
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: 为 true 时在每个快照中附带 standardDocuments 与 previewRows
+        - name: latestOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
       responses:
         "200":
           description: Snapshot list
@@ -486,9 +1193,78 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/TaskSnapshot"
+                  localFallback:
+                    type: boolean
                   requestId:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /settings/maintenance:
+    post:
+      tags: [System]
+      operationId: runMaintenance
+      summary: Run a maintenance action (ADMIN only)
+      description: 需要 `ADMIN` 角色。优先操作数据库，不可用时降级到本地存储。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  $ref: "#/components/schemas/MaintenanceAction"
+                clearProjects:
+                  type: boolean
+                  default: false
+                  description: 仅 reset-system 时生效
+      responses:
+        "200":
+          description: Maintenance executed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [action, label, storage, counts, clearProjects, requestId]
+                properties:
+                  action:
+                    $ref: "#/components/schemas/MaintenanceAction"
+                  label:
+                    type: string
+                  storage:
+                    type: string
+                    enum: [database, memory]
+                  counts:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  clearProjects:
+                    type: boolean
+                  localFallback:
+                    type: boolean
+                  requestId:
+                    type: string
+        "400":
+          description: Invalid maintenance action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: babeltower_session
+      description: HMAC-SHA256 签名的会话 token，登录后由服务端写入 HttpOnly Cookie。
+
   parameters:
     ProjectId:
       name: projectId
@@ -504,19 +1280,50 @@ components:
       schema:
         type: string
         format: uuid
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Not authenticated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Insufficient permission (requires ADMIN)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
   schemas:
+    UserRole:
+      type: string
+      enum: [ADMIN, MAINTAINER]
     FileFormat:
       type: string
-      enum: [JSON, PROPERTIES]
+      enum: [JSON, PROPERTIES, TS]
     TaskMode:
       type: string
       enum: [SINGLE_SOURCE, DUAL_SOURCE]
     TaskStatus:
       type: string
-      enum: [DRAFT, SAVED, READ_ONLY_HISTORY, CANCELLED]
+      enum: [DRAFT, IN_REVIEW, SAVED, READ_ONLY_HISTORY, CANCELLED, FAILED]
     SnapshotKind:
       type: string
       enum: [IMPORTED, AUTOSAVED, MANUAL_DRAFT, SAVED, EXPORTED]
+    EntryStatus:
+      type: string
+      enum: [NORMAL, UNSUPPORTED_VALUE, DUPLICATED_KEY]
+    ConflictLevel:
+      type: string
+      enum: [blocking, warning, info]
     ConflictType:
       type: string
       enum: [DUPLICATE_IDENTICAL, EXACT_CHINESE_DIFF_ENGLISH, SIMILAR_CHINESE]
@@ -525,10 +1332,55 @@ components:
       enum: [INFO, WARNING, BLOCKING]
     ConflictResolution:
       type: string
-      enum: [UNRESOLVED, KEEP_EXISTING, UPDATE_DICTIONARY, IGNORE_SIMILAR, EDIT_ROW]
+      enum: [KEEP_EXISTING, UPDATE_DICTIONARY, IGNORE_SIMILAR, EDIT_ROW]
+    MaintenanceAction:
+      type: string
+      enum: [clear-dictionaries, clear-snapshots, reset-system]
+
+    User:
+      type: object
+      required: [id, username, role, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AuthUser:
+      type: object
+      required: [id, username, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+    AuthUserResponse:
+      type: object
+      required: [user, requestId]
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        localFallback:
+          type: boolean
+        requestId:
+          type: string
+
     DictionaryEntry:
       type: object
-      required: [id, chineseText, englishText, createdAt, updatedAt]
+      required: [id, chineseText, englishText, tags, usageCount, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -544,7 +1396,7 @@ components:
           items:
             type: string
         note:
-          type: string
+          type: [string, "null"]
         usageCount:
           type: integer
         createdAt:
@@ -568,15 +1420,51 @@ components:
           items:
             type: string
         note:
+          type: [string, "null"]
+        reason:
           type: string
+          default: manual dictionary write
         resolution:
-          $ref: "#/components/schemas/ConflictResolution"
+          type: string
+          enum: [UPDATE_DICTIONARY]
+          description: 携带 UPDATE_DICTIONARY 以覆盖已有条目
     DictionaryEntryResponse:
       type: object
-      required: [entry, requestId]
+      required: [entry, conflictSummary, requestId]
       properties:
         entry:
           $ref: "#/components/schemas/DictionaryEntry"
+        conflictSummary:
+          $ref: "#/components/schemas/ConflictSummary"
+        localFallback:
+          type: boolean
+        requestId:
+          type: string
+    DictionaryConflictResponse:
+      type: object
+      required: [conflicts, requestId]
+      properties:
+        conflicts:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                $ref: "#/components/schemas/ConflictType"
+              severity:
+                $ref: "#/components/schemas/ConflictSeverity"
+              candidateChineseText:
+                type: string
+              candidateEnglishText:
+                type: string
+              existingChineseText:
+                type: string
+              existingEnglishText:
+                type: string
+              reason:
+                type: string
+        conflictSummary:
+          $ref: "#/components/schemas/ConflictSummary"
         requestId:
           type: string
     DictionarySearchResponse:
@@ -586,100 +1474,165 @@ components:
         items:
           type: array
           items:
-            type: object
-            required: [entry, matchType]
-            properties:
-              entry:
-                $ref: "#/components/schemas/DictionaryEntry"
-              matchType:
-                type: string
-                enum: [EXACT, FUZZY, SIMILAR]
-              score:
-                type: number
-                minimum: 0
-                maximum: 1
-        requestId:
-          type: string
-    ConflictCheckRequest:
-      type: object
-      required: [candidates]
-      properties:
-        taskId:
-          type: string
-          format: uuid
-        snapshotVersion:
-          type: integer
-        candidates:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [chineseText]
-            properties:
-              key:
-                type: string
-              chineseText:
-                type: string
-                minLength: 1
-              englishText:
-                type: string
-    ConflictCheckResponse:
-      type: object
-      required: [summary, conflicts, canWriteDictionary, requestId]
-      properties:
-        summary:
-          type: object
-          required: [total, blocking, warning, info]
-          properties:
-            total:
-              type: integer
-            blocking:
-              type: integer
-            warning:
-              type: integer
-            info:
-              type: integer
-        conflicts:
-          type: array
-          items:
-            $ref: "#/components/schemas/DictionaryConflict"
-        canWriteDictionary:
+            $ref: "#/components/schemas/DictionaryEntry"
+        localFallback:
           type: boolean
         requestId:
           type: string
-    DictionaryConflict:
+
+    StandardI18nEntry:
       type: object
-      required: [type, severity, candidateChineseText, reason, resolution]
+      required: [key, keyPath, sourceValue, translatedValue, locale, status]
       properties:
-        id:
+        key:
           type: string
-          format: uuid
-        type:
-          $ref: "#/components/schemas/ConflictType"
-        severity:
-          $ref: "#/components/schemas/ConflictSeverity"
-        resolution:
-          $ref: "#/components/schemas/ConflictResolution"
-        candidateKey:
+        keyPath:
+          type: array
+          items:
+            type: string
+        sourceValue:
+          type: [string, "null"]
+        translatedValue:
+          type: [string, "null"]
+        locale:
           type: string
-        candidateChineseText:
+        status:
+          $ref: "#/components/schemas/EntryStatus"
+        sourceLocation:
+          type: object
+          required: [line, column]
+          properties:
+            line:
+              type: integer
+            column:
+              type: integer
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    StandardI18nDocument:
+      type: object
+      required: [entries, locale, sourceFormat, sourceName]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/StandardI18nEntry"
+        locale:
           type: string
-        candidateEnglishText:
+        sourceFormat:
           type: string
-        existingDictionaryId:
+          enum: [json, properties, ts]
+        sourceName:
           type: string
-          format: uuid
-        existingChineseText:
+        metadata:
+          type: object
+          additionalProperties: true
+    StandardDocuments:
+      type: object
+      description: 实现以 source/target 对象存储双文档，而非数组
+      required: [source]
+      properties:
+        source:
+          $ref: "#/components/schemas/StandardI18nDocument"
+        target:
+          oneOf:
+            - $ref: "#/components/schemas/StandardI18nDocument"
+            - type: "null"
+
+    ConflictItem:
+      type: object
+      required: [key, keyPath, chineseValue, existingEnglish, newEnglish, level]
+      properties:
+        key:
           type: string
-        existingEnglishText:
+        keyPath:
+          type: array
+          items:
+            type: string
+        chineseValue:
           type: string
+        existingEnglish:
+          type: string
+        newEnglish:
+          type: string
+        level:
+          $ref: "#/components/schemas/ConflictLevel"
         similarity:
           type: number
           minimum: 0
           maximum: 1
+    ConflictSummary:
+      type: object
+      required: [blocking, warning, info, hasBlocking]
+      properties:
+        blocking:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConflictItem"
+        warning:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConflictItem"
+        info:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConflictItem"
+        hasBlocking:
+          type: boolean
+    ConflictCheckRequest:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/StandardI18nEntry"
+    ConflictCheckResponse:
+      type: object
+      required: [conflictSummary, requestId]
+      properties:
+        conflictSummary:
+          $ref: "#/components/schemas/ConflictSummary"
+        localFallback:
+          type: boolean
+        requestId:
+          type: string
+    TaskConflictRow:
+      type: object
+      required: [id, type, severity, key, keyPath, chineseValue, existingChinese, existingEnglish, newEnglish, reason, createdAt]
+      properties:
+        id:
+          type: string
+        type:
+          $ref: "#/components/schemas/ConflictType"
+        severity:
+          $ref: "#/components/schemas/ConflictSeverity"
+        key:
+          type: string
+        keyPath:
+          type: array
+          items:
+            type: string
+        chineseValue:
+          type: string
+        existingChinese:
+          type: string
+        existingEnglish:
+          type: string
+        newEnglish:
+          type: string
+        similarity:
+          type: [number, "null"]
         reason:
           type: string
-          example: 中文内容完全一致，但英文不同
+        resolvedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
     Project:
       type: object
       required: [id, code, name, createdAt, updatedAt]
@@ -692,9 +1645,12 @@ components:
         name:
           type: string
         description:
-          type: string
+          type: [string, "null"]
         currentTaskId:
-          type: string
+          type: [string, "null"]
+          format: uuid
+        createdById:
+          type: [string, "null"]
           format: uuid
         createdAt:
           type: string
@@ -702,6 +1658,19 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ProjectMutationResponse:
+      type: object
+      required: [project, requestId]
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        existed:
+          type: boolean
+        localFallback:
+          type: boolean
+        requestId:
+          type: string
+
     TranslationTask:
       type: object
       required: [id, projectId, name, mode, format, status, isEditable, latestVersion, createdAt, updatedAt]
@@ -731,11 +1700,17 @@ components:
         latestVersion:
           type: integer
         sourceFilename:
-          type: string
+          type: [string, "null"]
         targetFilename:
-          type: string
+          type: [string, "null"]
+        createdById:
+          type: [string, "null"]
+          format: uuid
         savedAt:
-          type: string
+          type: [string, "null"]
+          format: date-time
+        dictionarySyncedAt:
+          type: [string, "null"]
           format: date-time
         createdAt:
           type: string
@@ -743,101 +1718,77 @@ components:
         updatedAt:
           type: string
           format: date-time
-    StandardI18nDocument:
-      type: object
-      required: [schemaVersion, format, role, keySeparator, entries, meta]
-      properties:
-        schemaVersion:
-          type: string
-          const: "1.0"
-        format:
-          type: string
-          enum: [json, properties]
-        locale:
-          type: string
-        role:
-          type: string
-          enum: [source, target, dictionary]
-        keySeparator:
-          type: string
-          const: "."
-        entries:
-          type: array
-          items:
-            $ref: "#/components/schemas/StandardI18nEntry"
-        meta:
-          type: object
-          additionalProperties: true
-    StandardI18nEntry:
-      type: object
-      required: [key, keyPath, value, valueType, order, source]
-      properties:
-        key:
-          type: string
-        keyPath:
-          type: array
-          items:
-            type: string
-        value:
-          type: string
-        valueType:
-          type: string
-          const: string
-        order:
-          type: integer
-        source:
-          type: object
-          additionalProperties: true
-        flags:
-          type: array
-          items:
-            type: string
-            enum: [UNSUPPORTED_VALUE, DUPLICATED_KEY, MISSING_IN_SOURCE, MISSING_IN_TARGET]
+    TaskListItem:
+      allOf:
+        - $ref: "#/components/schemas/TranslationTask"
+        - type: object
+          properties:
+            project:
+              type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+
     PreviewRow:
       type: object
-      required: [rowId, key, keyPath, zhText, status, conflicts, updatedAt]
+      required: [key, keyPath, sourceValue, translatedValue, status]
       properties:
-        rowId:
-          type: string
         key:
           type: string
         keyPath:
           type: array
           items:
             type: string
-        zhText:
-          type: string
-        enText:
-          type: string
-        dictionaryText:
-          type: string
-        finalEnText:
-          type: string
+        sourceValue:
+          type: [string, "null"]
+        translatedValue:
+          type: [string, "null"]
         status:
-          type: string
-          enum: [READY, MISSING_REQUIRED, CONFLICT, UNSUPPORTED]
-        conflicts:
-          type: array
-          items:
-            $ref: "#/components/schemas/DictionaryConflict"
-        updatedAt:
-          type: string
-          format: date-time
+          $ref: "#/components/schemas/EntryStatus"
+        conflictLevel:
+          oneOf:
+            - $ref: "#/components/schemas/ConflictLevel"
+            - type: "null"
     PreviewRowPatch:
       type: object
-      required: [rowId]
+      description: 行标识用 key 或 rowKey，其余字段可选
       properties:
-        rowId:
+        key:
           type: string
-        zhText:
+        rowKey:
           type: string
-        enText:
+        rowIndex:
+          type: integer
+        keyPath:
+          type: array
+          items:
+            type: string
+        sourceValue:
+          type: [string, "null"]
+        translatedValue:
+          type: [string, "null"]
+        status:
           type: string
-        dictionaryText:
+        conflictLevel:
+          oneOf:
+            - $ref: "#/components/schemas/ConflictLevel"
+            - type: "null"
+    ResolvedConflictInput:
+      type: object
+      required: [key, resolution]
+      properties:
+        key:
           type: string
+        resolution:
+          $ref: "#/components/schemas/ConflictResolution"
+
     TaskSnapshot:
       type: object
-      required: [id, taskId, version, kind, standardDocuments, previewRows, conflictSummary, createdAt]
+      required: [id, taskId, version, kind, conflictSummary, createdAt]
       properties:
         id:
           type: string
@@ -849,65 +1800,102 @@ components:
           type: integer
         kind:
           $ref: "#/components/schemas/SnapshotKind"
+        conflictSummary:
+          $ref: "#/components/schemas/ConflictSummary"
+        validationErrors:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        exportManifest:
+          type: [object, "null"]
+          additionalProperties: true
+        createdById:
+          type: [string, "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
         standardDocuments:
+          $ref: "#/components/schemas/StandardDocuments"
+        previewRows:
           type: array
           items:
-            $ref: "#/components/schemas/StandardI18nDocument"
+            $ref: "#/components/schemas/PreviewRow"
+    TaskImportResponse:
+      type: object
+      required: [task, latestSnapshot, previewRows, conflictSummary, dictionaryHits, requestId]
+      properties:
+        task:
+          $ref: "#/components/schemas/TranslationTask"
+        latestSnapshot:
+          $ref: "#/components/schemas/TaskSnapshot"
         previewRows:
           type: array
           items:
             $ref: "#/components/schemas/PreviewRow"
         conflictSummary:
-          $ref: "#/components/schemas/ConflictCheckResponse"
-        validationErrors:
-          type: array
-          items:
-            $ref: "#/components/schemas/ValidationError"
-        exportManifest:
+          $ref: "#/components/schemas/ConflictSummary"
+        dictionaryHits:
           type: object
-          additionalProperties: true
-        createdAt:
-          type: string
-          format: date-time
-    TaskImportResponse:
-      type: object
-      required: [task, snapshot, requestId]
-      properties:
-        task:
-          $ref: "#/components/schemas/TranslationTask"
-        snapshot:
-          $ref: "#/components/schemas/TaskSnapshot"
+          additionalProperties:
+            type: string
+          description: 中文 -> 英文 的字典命中映射
+        localFallback:
+          type: boolean
         requestId:
           type: string
-    TaskSnapshotResponse:
-      type: object
-      required: [snapshot, requestId]
-      properties:
-        snapshot:
-          $ref: "#/components/schemas/TaskSnapshot"
-        requestId:
-          type: string
+
     SaveTaskRequest:
       type: object
-      required: [snapshotVersion, syncDictionary]
+      required: [snapshotVersion]
       properties:
         snapshotVersion:
           type: integer
           minimum: 1
-        syncDictionary:
-          type: boolean
-          description: Whether to write resolved preview rows into Dictionary
-        conflictResolutions:
+        resolutions:
+          type: object
+          description: 冲突解决映射（conflictId/key -> ConflictResolution）
+          additionalProperties:
+            $ref: "#/components/schemas/ConflictResolution"
+    SaveConflictResponse:
+      type: object
+      required: [conflicts, requestId]
+      properties:
+        conflicts:
           type: array
           items:
             type: object
-            required: [conflictId, resolution]
             properties:
-              conflictId:
+              id:
                 type: string
-                format: uuid
-              resolution:
-                $ref: "#/components/schemas/ConflictResolution"
+              type:
+                $ref: "#/components/schemas/ConflictType"
+              severity:
+                $ref: "#/components/schemas/ConflictSeverity"
+              candidateKey:
+                type: [string, "null"]
+              candidateChineseText:
+                type: string
+              candidateEnglishText:
+                type: [string, "null"]
+              existingChineseText:
+                type: [string, "null"]
+              existingEnglishText:
+                type: [string, "null"]
+              similarity:
+                type: [number, "null"]
+              reason:
+                type: string
+              resolvedAt:
+                type: [string, "null"]
+                format: date-time
+              createdAt:
+                type: string
+                format: date-time
+        localFallback:
+          type: boolean
+        requestId:
+          type: string
     DictionarySyncResult:
       type: object
       required: [created, updated, skipped]
@@ -918,49 +1906,79 @@ components:
           type: integer
         skipped:
           type: integer
-        conflicts:
-          type: array
-          items:
-            $ref: "#/components/schemas/DictionaryConflict"
+
+    ValidationError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
     ValidationResponse:
       type: object
-      required: [valid, errors, requestId]
+      required: [valid, validationErrors, unresolvedBlocking, requestId]
       properties:
         valid:
           type: boolean
-        errors:
+        validationErrors:
           type: array
           items:
             $ref: "#/components/schemas/ValidationError"
+        unresolvedBlocking:
+          type: integer
+        localFallback:
+          type: boolean
         requestId:
           type: string
-    ValidationError:
+    ValidationFailedResponse:
       type: object
-      required: [code, message]
+      required: [valid, validationErrors, requestId]
       properties:
-        rowId:
+        valid:
+          type: boolean
+          const: false
+        validationErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        localFallback:
+          type: boolean
+        requestId:
           type: string
-        key:
+
+    VersionConflictResponse:
+      type: object
+      required: [error, requestId]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+              example: snapshot version conflict
+            details:
+              type: object
+              properties:
+                expected:
+                  type: integer
+                actual:
+                  type: integer
+        requestId:
           type: string
-        code:
-          type: string
-          enum: [MISSING_KEY, MISSING_ZH_TEXT, MISSING_EN_TEXT, MISSING_FINAL_EN_TEXT, KEY_MISMATCH, UNSUPPORTED_VALUE]
-        message:
-          type: string
+
     ErrorResponse:
       type: object
       required: [error, requestId]
       properties:
         error:
           type: object
-          required: [code, message]
+          required: [message]
           properties:
-            code:
-              type: string
             message:
               type: string
             details:
-              type: object
-              additionalProperties: true
+              description: 可选的错误细节，结构因端点而异
         requestId:
           type: string
