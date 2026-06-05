@@ -25,7 +25,8 @@ metadata:
 
 ## Reference（参考文档）
 
-- [`reference/known-gaps.md`](reference/known-gaps.md) — OpenAPI 与实现不一致、缺失功能、测试缺口、ESLint 问题、性能隐患
+- [`reference/known-gaps.md`](reference/known-gaps.md) — OpenAPI 一致性（含历史偏差留档）、缺失功能、测试缺口、ESLint 问题、性能隐患
+- [`reference/ci-and-tooling.md`](reference/ci-and-tooling.md) — pnpm 包管理器约定、CI job 工具链、关键依赖版本锁定（@redocly/cli）及原因
 
 ## Memory（历史记忆）
 

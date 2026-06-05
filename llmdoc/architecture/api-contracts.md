@@ -339,12 +339,8 @@ try {
 | POST `/api/dictionaries/conflicts` | `getLocalDictionaryEntriesForConflict` |
 | POST `/api/settings/maintenance` | `clearLocalDictionaries` / `clearLocalSnapshots` / `resetLocalSnapshotsAndDictionaries` |
 
-## OpenAPI 与实现的差异
+## OpenAPI 与实现的一致性
 
-`openapi/babeltower.v1.yaml` 与实现存在多处不一致，详见 `llmdoc/reference/known-gaps.md`。
+`openapi/babeltower.v1.yaml` 已以 route handler 源码为准重写并对齐实现，可作为 API 调用的可靠参考。该 spec 含 `cookieAuth` securityScheme 与全局 `security`，并补齐了鉴权、用户、项目、冲突查询、系统维护等已实现接口。`redocly lint` 现 0 error。
 
-关键差异摘要：
-- `standardDocuments`：spec 定义为数组，实现存储为 `{ source, target }` 对象
-- `PreviewRow`：spec 使用 `zhText`/`enText`，实现使用 `sourceValue`/`translatedValue`
-- 导出响应：spec 要求 `application/zip`，实现返回 JSON
-- 导入响应：实现额外返回 `previewRows`、`conflictSummary`、`dictionaryHits`
+此前记录的 13 处偏差（导出响应、PreviewRow 字段、StandardI18nDocument/Entry、冲突检测契约、TaskStatus/FileFormat 枚举等）现已全部修正，历史留档见 `llmdoc/reference/known-gaps.md` 的「OpenAPI 与实现的一致性」小节。

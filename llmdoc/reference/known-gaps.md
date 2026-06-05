@@ -1,33 +1,40 @@
 ---
 name: known-gaps
-description: OpenAPI 与实现不一致、缺失功能、测试覆盖缺口、ESLint 配置问题与性能隐患
+description: OpenAPI 与实现一致性（含历史偏差留档）、缺失功能、测试覆盖缺口、ESLint 配置问题与性能隐患
 metadata:
   type: reference
 ---
 
 # 已知缺口
 
-## OpenAPI 与实现的不一致
+## OpenAPI 与实现的一致性
 
-`openapi/babeltower.v1.yaml` 与实现存在以下不一致：
+`openapi/babeltower.v1.yaml` 已以 route handler 源码为准完整重写并对齐实现，可作为 API 调用的可靠参考：
 
-| # | 领域 | OpenAPI Spec | 实现 | 严重程度 |
-|---|------|-------------|------|----------|
-| 1 | **导出响应格式** | `content-type: application/zip`，二进制流 | `content-type: application/json`，返回 `{ files: Record<string, string>, fileBaseName }` | **MAJOR** |
-| 2 | **Task 导入响应** | `{ task, snapshot, requestId }` | `{ task, latestSnapshot, previewRows, conflictSummary, dictionaryHits }` | **MAJOR** |
-| 3 | **PreviewRow 字段** | `rowId`, `zhText`, `enText`, `dictionaryText`, `finalEnText`, `conflicts[]` | `key`, `keyPath`, `sourceValue`, `translatedValue`, `status`, `conflictLevel` | **MAJOR** |
-| 4 | **PreviewRowPatch** | `rowId`, `zhText`, `enText`, `dictionaryText` | `rows` 数组含 `key`, `keyPath`, `sourceValue`, `translatedValue`, `status` | **MAJOR** |
-| 5 | **StandardI18nDocument** | `schemaVersion`, `format`, `role`, `keySeparator`, `entries`, `meta` | `entries`, `locale`, `sourceFormat`, `sourceName`, `metadata` | **MAJOR** |
-| 6 | **StandardI18nEntry** | `key`, `keyPath`, `value`, `valueType`, `order`, `source`, `flags` | `key`, `keyPath`, `sourceValue`, `translatedValue`, `locale`, `status`, `sourceLocation`, `metadata` | **MAJOR** |
-| 7 | **ConflictCheckRequest** | `candidates` 数组含 `chineseText`, `englishText` | `entries` 数组含 `key`, `keyPath`, `sourceValue`, `translatedValue` | **MAJOR** |
-| 8 | **ConflictCheckResponse** | `summary`, `conflicts[]`, `canWriteDictionary` | `{ conflictSummary }`（含 `blocking`, `warning`, `info`） | **MAJOR** |
-| 9 | **standardDocuments 存储** | 定义为数组 | 实现存储为 `{ source, target }` 对象 | **MAJOR** |
-| 10 | **DictionarySearchResponse** | `items: { entry, matchType, score }[]` | `items: DictEntry[]`（无 matchType/score） | **MAJOR** |
-| 11 | **ValidationResponse** | `valid`, `errors[]` | `valid`, `validationErrors[]`, `unresolvedBlocking` | Minor |
-| 12 | **TaskStatus** | `DRAFT`, `SAVED`, `READ_ONLY_HISTORY`, `CANCELLED` | 同上 + `IN_REVIEW`, `FAILED` | Minor |
-| 13 | **SaveTaskRequest** | `syncDictionary`, `conflictResolutions[]` | `syncDictionary` 未使用；`resolutions` 形状不同 | Minor |
+- 新增 `cookieAuth` securityScheme（`apiKey` in cookie：`babeltower_session`），全局默认 `security: [{ cookieAuth: [] }]`；公开接口（getHealth/login/logout/getCurrentUser）标 `security: []`。
+- 补齐了之前缺失的已实现接口：`POST /auth/login`、`POST /auth/logout`、`GET /auth/me`、`PATCH /account`、`GET/POST /users`、`PATCH/DELETE /users/{userId}`、`PATCH/DELETE /projects/{projectId}`、`GET /tasks/{taskId}/conflicts`、`POST /settings/maintenance`。
+- 使用 OpenAPI 3.1 联合类型 `type: [X, "null"]` 表达可空（非 3.0 的 `nullable`）。
+- `redocly lint openapi/babeltower.v1.yaml` 现 0 error，仅余 3 个无害 warning：`info-license`、health/logout 的 `operation-4xx-response`。
 
-**建议**：OpenAPI spec 应更新以匹配实际实现，或实现应重构以匹配 spec。当前 spec 不能作为 API 调用的可靠参考。
+### 历史偏差（已于本次重写修复）
+
+下表记录的偏差曾导致 spec 不可作为可靠参考，现已全部对齐源码，仅作历史留档：
+
+| # | 领域 | 旧 OpenAPI Spec | 已对齐的实现 |
+|---|------|-----------------|--------------|
+| 1 | **导出响应格式** | `content-type: application/zip`，二进制流 | JSON `{ valid, files: Record<string, string>, fileBaseName }` |
+| 2 | **Task 导入响应** | `{ task, snapshot, requestId }` | `{ task, latestSnapshot, previewRows, conflictSummary, dictionaryHits }` |
+| 3 | **PreviewRow 字段** | `rowId`, `zhText`, `enText`, `dictionaryText`, `finalEnText`, `conflicts[]` | `key`, `keyPath`, `sourceValue`, `translatedValue`, `status`, `conflictLevel` |
+| 4 | **PreviewRowPatch** | `rowId`, `zhText`, `enText`, `dictionaryText` | `rows` 数组含 `key`, `keyPath`, `sourceValue`, `translatedValue`, `status` |
+| 5 | **StandardI18nDocument** | `schemaVersion`, `format`, `role`, `keySeparator`, `entries`, `meta` | 对象 `{ entries, locale, sourceFormat, sourceName, metadata }` |
+| 6 | **StandardI18nEntry** | `key`, `keyPath`, `value`, `valueType`, `order`, `source`, `flags` | `key`, `keyPath`, `sourceValue`, `translatedValue`, `locale`, `status`, `sourceLocation`, `metadata` |
+| 7 | **ConflictCheckRequest** | `candidates` 数组含 `chineseText`, `englishText` | `{ entries: StandardI18nEntry[] }` |
+| 8 | **ConflictCheckResponse** | `summary`, `conflicts[]`, `canWriteDictionary` | `{ conflictSummary }`（含 `blocking`, `warning`, `info`） |
+| 9 | **standardDocuments 存储** | 定义为数组 | `StandardDocuments` 对象 `{ source, target }` |
+| 10 | **DictionarySearchResponse** | `items: { entry, matchType, score }[]` | `items: DictionaryEntry[]`（无 matchType/score） |
+| 11 | **ValidationResponse** | `valid`, `errors[]` | `valid`, `validationErrors[]`, `unresolvedBlocking` |
+| 12 | **TaskStatus** | `DRAFT`, `SAVED`, `READ_ONLY_HISTORY`, `CANCELLED` | 同上 + `IN_REVIEW`, `FAILED` |
+| 13 | **其他枚举/响应补齐** | `FileFormat` 缺 TS；`ConflictResolution` 含 `UNRESOLVED`；降级响应缺 `localFallback` | `FileFormat` 补 `TS`；`ConflictResolution` 为 `KEEP_EXISTING`/`UPDATE_DICTIONARY`/`IGNORE_SIMILAR`/`EDIT_ROW`；降级响应补 `localFallback` |
 
 ## 缺失的功能
 
@@ -36,12 +43,6 @@ metadata:
 - 任务、快照、字典条目仍无 DELETE 端点
 - OpenAPI spec 也未定义 DELETE 操作
 - `TrashIcon` 组件存在于 `icons.tsx` 但未被使用
-
-### 认证与授权
-- 无登录页面、认证中间件、会话/令牌处理
-- 所有 API 路由公开可访问
-- `createdById`, `changedById`, `resolvedById` 等字段始终为 null
-- TopBar 显示静态 "Z" 头像，无用户菜单
 
 ### 分页
 - API 端点接受 `limit` 参数但无 `offset`/`cursor`
