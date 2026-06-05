@@ -29,6 +29,7 @@ metadata:
 - 用户禁用、启用、改密码、删除后会清理用户状态缓存；禁用用户下一次受保护 API 请求返回 401。
 - 健康检查、登录、退出和 `GET /api/auth/me` 之外，业务 API 默认要求登录。
 - 系统配置、用户管理和开发态 `DELETE /api/debug/local-store` 要求 `ADMIN`。
+- **ADMIN 账号受保护**：目标用户 `role === "ADMIN"` 时，`PATCH /api/users/{id}` 置为禁用返回 403「管理员账号不允许禁用」，`DELETE /api/users/{id}` 返回 403「管理员账号不允许删除」。DB 与 local-store 降级两条路径都覆盖。设计初衷是系统只保留一个管理员账号；前端 `/users` 页对 ADMIN 行不渲染操作按钮并显示「管理员账号受保护」（纵深防御，前端隐藏仅为体验，后端独立拦截）。
 - `createdById`、`updatedById`、`changedById`、`resolvedById` 由服务端当前登录用户写入，不接受前端传入的同名字段作为审计来源。
 - `DRAFT` 任务、草稿行和暂存快照仅创建人可读写；非 `DRAFT` 已保存数据对登录用户共享可见。
 
@@ -44,8 +45,8 @@ metadata:
 | PATCH | `/api/account` | 当前用户修改用户名/密码 | `{ username?, currentPassword?, password? }` |
 | GET | `/api/users` | 管理员查询用户 | `username`, `isActive` |
 | POST | `/api/users` | 管理员新增维护者，随机密码一次性返回 | `{ username }` |
-| PATCH | `/api/users/{id}` | 管理员启用/禁用用户 | `{ isActive }` |
-| DELETE | `/api/users/{id}` | 管理员删除无业务数据用户 | - |
+| PATCH | `/api/users/{id}` | 管理员启用/禁用用户；禁用 ADMIN 返回 403 | `{ isActive }` |
+| DELETE | `/api/users/{id}` | 管理员删除无业务数据用户；删除 ADMIN 返回 403 | - |
 
 ### 健康检查
 
@@ -284,6 +285,7 @@ metadata:
 | 状态码 | 场景 |
 |--------|------|
 | 400 | 缺少必填字段、格式无效 |
+| 403 | 权限不足 / 受保护资源拒绝（如禁用或删除 ADMIN 账号） |
 | 404 | Task/snapshot 未找到 |
 | 409 | 快照版本冲突、未解决 blocking 冲突、字典中文冲突 |
 | 422 | 导出前验证失败 |

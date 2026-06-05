@@ -21,6 +21,7 @@ metadata:
 - [`architecture/domain-engine.md`](architecture/domain-engine.md) — Standard JSON 中间结构、解析器架构、冲突检测引擎（Jaro-Winkler）、导出器、保存服务
 - [`architecture/api-contracts.md`](architecture/api-contracts.md) — 所有 API 端点、请求/响应契约、版本并发控制、降级模式
 - [`architecture/data-model.md`](architecture/data-model.md) — Prisma Schema 核心模型、中文去重机制、事务模式、降级存储
+- [`architecture/frontend-conventions.md`](architecture/frontend-conventions.md) — 全局消息 Provider、ConfirmPopover 二次确认组件、浮层 Portal-to-body 定位约定、不使用 window.confirm
 
 ## Reference（参考文档）
 
