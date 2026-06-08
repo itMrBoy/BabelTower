@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import {
   createLocalImportTask,
   getLocalDictionaryEntriesForConflict,
+  getLocalUserById,
   isDatabaseUnavailable,
   listLocalTasks,
 } from "@/lib/local-store";
@@ -44,6 +45,11 @@ function parseFailureDetails(fileName: string, error: unknown) {
   };
 }
 
+function localCreator(createdById: string | null) {
+  const user = createdById ? getLocalUserById(createdById) : null;
+  return user ? { id: user.id, username: user.username } : null;
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireUser(request);
   if (auth.response) return auth.response;
@@ -72,13 +78,29 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { updatedAt: "desc" },
     });
-    return ok({ items });
+    const creatorIds = Array.from(new Set(items.map((item) => item.createdById).filter(Boolean))) as string[];
+    const creators = creatorIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: creatorIds } },
+          select: { id: true, username: true },
+        })
+      : [];
+    const creatorById = new Map(creators.map((creator) => [creator.id, creator]));
+    return ok({
+      items: items.map((item) => ({
+        ...item,
+        createdBy: item.createdById ? creatorById.get(item.createdById) ?? null : null,
+      })),
+    });
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
       const items = listLocalTasks({ projectId, status, historyOnly }).filter(
         (task) => task.status !== "DRAFT" || task.createdById === currentUser.id,
       );
-      return ok({ items, localFallback: true });
+      return ok({
+        items: items.map((item) => ({ ...item, createdBy: localCreator(item.createdById) })),
+        localFallback: true,
+      });
     }
     return fail("task list failed", 500, error instanceof Error ? error.message : String(error));
   }
@@ -227,7 +249,10 @@ export async function POST(request: NextRequest) {
 
       await tx.productProject.update({ where: { id: projectId }, data: { currentTaskId: created.id } });
       return { ...created, latestSnapshot: snapshot };
-    });
+    },
+    // 大文件导入需写入快照(含完整文档)、~1000 条 taskDraftRow 与 dictionaryConflict;
+    // 默认 5s 事务超时不够,放长到 30s 作为安全网。
+    { maxWait: 5_000, timeout: 30_000 });
 
     return ok({ task, latestSnapshot: task.latestSnapshot, previewRows, conflictSummary: summary, dictionaryHits }, 201);
   } catch (error) {

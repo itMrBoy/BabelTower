@@ -29,6 +29,11 @@ interface Task {
   sourceLocale: string;
   targetLocale: string;
   dictionarySyncedAt: string | null;
+  createdById?: string | null;
+  createdBy?: {
+    id: string;
+    username: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,6 +51,11 @@ interface Snapshot {
   version: number;
   kind: string;
   conflictSummary?: SnapshotSummaryCounts | null;
+  createdById?: string | null;
+  createdBy?: {
+    id: string;
+    username: string;
+  } | null;
   createdAt: string;
 }
 
@@ -109,6 +119,12 @@ function formatTime(value: string | null | undefined) {
   const hh = String(date.getHours()).padStart(2, "0");
   const mi = String(date.getMinutes()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+function creatorLabel(value?: { username?: string | null } | null, createdById?: string | null) {
+  if (value?.username) return value.username;
+  if (createdById) return createdById.slice(0, 8);
+  return "—";
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -226,6 +242,7 @@ export default function SnapshotsPage() {
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">格式</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">模式</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">语言对</th>
+                  <th className="text-left px-5 py-3 font-medium whitespace-nowrap">创建者</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">状态</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">字典</th>
                   <th className="text-left px-5 py-3 font-medium whitespace-nowrap">最新版本</th>
@@ -236,7 +253,7 @@ export default function SnapshotsPage() {
               <tbody className="divide-y divide-slate-100">
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-5 py-12 text-center text-sm text-slate-400">
+                    <td colSpan={11} className="px-5 py-12 text-center text-sm text-slate-400">
                       {loadingTasks ? "正在从 /api/tasks 加载…" : "暂无任务，请先在首页导入文件。"}
                     </td>
                   </tr>
@@ -261,9 +278,15 @@ export default function SnapshotsPage() {
                       }
                     }}
                   >
-                    <td className="px-5 py-3 font-medium text-slate-800">{task.name}</td>
+                    <td className="px-5 py-3 font-medium text-slate-800">
+                      <div className="max-w-[180px] truncate" title={task.name}>
+                        {task.name}
+                      </div>
+                    </td>
                     <td className="px-5 py-3 text-xs text-slate-600 whitespace-nowrap">
-                      {task.project?.name ?? "—"}
+                      <div className="max-w-[160px] truncate" title={task.project?.name ?? ""}>
+                        {task.project?.name ?? "—"}
+                      </div>
                     </td>
                     <td className="px-5 py-3 text-xs text-slate-600">{task.format}</td>
                     <td className="px-5 py-3 text-xs text-slate-600">
@@ -271,6 +294,9 @@ export default function SnapshotsPage() {
                     </td>
                     <td className="px-5 py-3 text-xs text-slate-500">
                       {task.sourceLocale} → {task.targetLocale}
+                    </td>
+                    <td className="px-5 py-3 text-xs text-slate-600 whitespace-nowrap">
+                      {creatorLabel(task.createdBy, task.createdById)}
                     </td>
                     <td className="px-5 py-3">{statusBadge(task.status)}</td>
                     <td className="px-5 py-3">{dictionarySyncBadge(task.dictionarySyncedAt)}</td>
@@ -406,6 +432,7 @@ export default function SnapshotsPage() {
                         <th className="text-left px-4 py-2 font-medium whitespace-nowrap">Blocking</th>
                         <th className="text-left px-4 py-2 font-medium whitespace-nowrap">Warning</th>
                         <th className="text-left px-4 py-2 font-medium whitespace-nowrap">Info</th>
+                        <th className="text-left px-4 py-2 font-medium whitespace-nowrap">创建者</th>
                         <th className="text-left px-4 py-2 font-medium whitespace-nowrap">生成时间</th>
                       </tr>
                     </thead>
@@ -423,6 +450,9 @@ export default function SnapshotsPage() {
                               {summary.warning ?? 0}
                             </td>
                             <td className="px-4 py-2 text-xs text-slate-500">{summary.info ?? 0}</td>
+                            <td className="px-4 py-2 text-xs text-slate-600 whitespace-nowrap">
+                              {creatorLabel(snap.createdBy, snap.createdById)}
+                            </td>
                             <td className="px-4 py-2 text-xs text-slate-400 whitespace-nowrap">{formatTime(snap.createdAt)}</td>
                           </tr>
                         );
