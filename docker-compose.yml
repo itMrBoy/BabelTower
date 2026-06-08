@@ -33,7 +33,8 @@ services:
       db:
         condition: service_healthy
 
-  # 开发模式（可选）：使用 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+  # 开发模式（可选，profile=dev）：使用 docker compose --profile dev up -d app-dev
+  # （必须点名 app-dev，否则会与下面无 profile 的 app 抢占 3000 端口）
   app-dev:
     build:
       context: .

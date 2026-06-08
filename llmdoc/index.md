@@ -34,6 +34,10 @@ metadata:
 - `memory/decisions/` — 由 recorder 维护（当前为空）
 - [`memory/doc-gaps.md`](memory/doc-gaps.md) — 文档缺口跟踪
 
+## 根目录文档（llmdoc 之外）
+
+- [`../DEPLOYMENT.md`](../DEPLOYMENT.md) — 部署流程、环境配置、Docker/容器命令与 CI/自动化说明（运维入口，权威性以源码/镜像为准，命令细节交叉参见 `reference/ci-and-tooling.md` 与 `startup.md`）
+
 ## 启动阅读顺序
 
 见 [`startup.md`](startup.md)

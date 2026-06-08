@@ -12,3 +12,4 @@ coverage/
 .DS_Store
 .llmdoc-tmp/
 .claude/
+.playwright-mcp/

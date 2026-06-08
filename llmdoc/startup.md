@@ -43,13 +43,13 @@ pnpm ci:check
 # 启动全部服务（生产模式）
 docker compose up -d --build
 
-# 同步数据库
-docker compose exec app pnpm exec prisma db push --skip-generate
+# 同步数据库（standalone 镜像内无 pnpm，容器内用全局安装的 prisma）
+docker compose exec app prisma db push --skip-generate
 
 # 健康检查
 curl http://localhost:3000/api/health
 
-# 开发模式（热重载）
+# 开发模式（热重载）；必须点名 app-dev，否则会与无 profile 的 app 抢占 3000 端口
 docker compose --profile dev up -d app-dev
 ```
 
