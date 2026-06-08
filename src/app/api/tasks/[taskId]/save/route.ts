@@ -7,12 +7,9 @@ import {
   unresolvedBlockingConflicts,
 } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
-import { chineseHash, normalizeText } from "@/lib/standard";
+import { preClassifyRows, splitCandidates } from "@/lib/dictionary-sync";
+import { normalizeText } from "@/lib/standard";
 import type { PreviewRow } from "@/domain/standard-i18n/types";
-
-function sameNormalizedText(left: string, right: string) {
-  return normalizeText(left) === normalizeText(right);
-}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
   const auth = await requireUser(request);
@@ -45,92 +42,100 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     let updated = 0;
     let skipped = 0;
 
-    const result = await prisma.$transaction(async (tx) => {
-      const seenHashes = new Set<string>();
-      for (const row of rows) {
-        const chineseText = row.sourceValue?.trim();
-        const englishText = row.translatedValue?.trim();
-        if (!chineseText || !englishText) {
-          skipped++;
-          continue;
-        }
+    // 阶段一:无 DB 预处理(去重 / 空值 / hash 计算),移出事务以缩短事务窗口。
+    const pre = preClassifyRows(rows);
+    skipped += pre.skipped;
 
-        const hash = chineseHash(chineseText);
-        if (seenHashes.has(hash)) {
-          skipped++;
-          continue;
-        }
-        seenHashes.add(hash);
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const hashes = [...pre.candidates.keys()];
 
-        const existing = await tx.dictionary.findUnique({ where: { chineseHash: hash } });
+        // 1 次批量查已存在,替代原来逐行的 N 次 findUnique。
+        const existingRows = hashes.length === 0
+          ? []
+          : await tx.dictionary.findMany({
+              where: { chineseHash: { in: hashes } },
+              select: { id: true, chineseHash: true, englishText: true },
+            });
+        const existing = new Map(
+          existingRows.map((row) => [row.chineseHash, { englishText: row.englishText }]),
+        );
 
-        if (!existing) {
-          const entry = await tx.dictionary.create({
-            data: {
-              chineseText,
-              chineseHash: hash,
-              normalizedChinese: normalizeText(chineseText),
-              englishText,
-              normalizedEnglish: normalizeText(englishText),
+        const { creates, updates, skippedSameEnglish } = splitCandidates(pre.candidates, existing);
+        skipped += skippedSameEnglish;
+
+        // 批量新建 + 直接拿回插入行(含 db 生成 id),用于写 revision。
+        if (creates.length > 0) {
+          const inserted = await tx.dictionary.createManyAndReturn({
+            data: creates.map((candidate) => ({
+              chineseText: candidate.chineseText,
+              chineseHash: candidate.hash,
+              normalizedChinese: normalizeText(candidate.chineseText),
+              englishText: candidate.englishText,
+              normalizedEnglish: normalizeText(candidate.englishText),
               usageCount: 1,
               createdById: currentUser.id,
+              updatedById: currentUser.id,
+            })),
+            skipDuplicates: true, // 并发下若别人已插入相同 chineseHash 则跳过,避免 P2002 回滚整个事务
+            select: { id: true, englishText: true },
+          });
+          created += inserted.length; // 精确:只数真正插入的行
+          if (inserted.length > 0) {
+            await tx.dictionaryRevision.createMany({
+              data: inserted.map((entry) => ({
+                dictionaryId: entry.id,
+                previousEnglish: null,
+                nextEnglish: entry.englishText,
+                reason: "task save",
+                changedById: currentUser.id,
+              })),
+            });
+          }
+        }
+
+        // 更新分支:中文同英文不同。导入时已被标为 BLOCKING 冲突并在 save 前强制解决,
+        // 正常流程几乎走不到(~1-5%,仅并发竞态),故保持逐条,不批量化。
+        for (const { candidate, previousEnglish } of updates) {
+          const entry = await tx.dictionary.update({
+            where: { chineseHash: candidate.hash },
+            data: {
+              chineseText: candidate.chineseText,
+              normalizedChinese: normalizeText(candidate.chineseText),
+              englishText: candidate.englishText,
+              normalizedEnglish: normalizeText(candidate.englishText),
+              usageCount: { increment: 1 },
               updatedById: currentUser.id,
             },
           });
           await tx.dictionaryRevision.create({
             data: {
               dictionaryId: entry.id,
-              previousEnglish: null,
-              nextEnglish: englishText,
+              previousEnglish,
+              nextEnglish: candidate.englishText,
               reason: "task save",
               changedById: currentUser.id,
             },
           });
-          created++;
-          continue;
+          updated++;
         }
 
-        if (sameNormalizedText(existing.englishText, englishText)) {
-          skipped++;
-          continue;
-        }
-
-        const entry = await tx.dictionary.update({
-          where: { chineseHash: hash },
-          data: {
-            chineseText,
-            normalizedChinese: normalizeText(chineseText),
-            englishText,
-            normalizedEnglish: normalizeText(englishText),
-            usageCount: { increment: 1 },
-            updatedById: currentUser.id,
-          },
+        await tx.dictionaryConflict.updateMany({
+          where: { taskId, resolvedAt: null },
+          data: { resolvedAt: new Date(), resolution: "UPDATE_DICTIONARY", resolvedById: currentUser.id },
         });
 
-        await tx.dictionaryRevision.create({
-          data: {
-            dictionaryId: entry.id,
-            previousEnglish: existing?.englishText ?? null,
-            nextEnglish: englishText,
-            reason: "task save",
-            changedById: currentUser.id,
-          },
+        const task = await tx.translationTask.update({
+          where: { id: taskId },
+          data: { dictionarySyncedAt: new Date() },
         });
-        updated++;
-      }
 
-      await tx.dictionaryConflict.updateMany({
-        where: { taskId, resolvedAt: null },
-        data: { resolvedAt: new Date(), resolution: "UPDATE_DICTIONARY", resolvedById: currentUser.id },
-      });
+        return { task, snapshot };
+      },
+      // 批量化后正常仅几百毫秒;30s 作为覆盖慢 DB / 锁等待 / update 长尾的安全网。
+      { maxWait: 5_000, timeout: 30_000 },
+    );
 
-      const task = await tx.translationTask.update({
-        where: { id: taskId },
-        data: { dictionarySyncedAt: new Date() },
-      });
-
-      return { task, snapshot };
-    });
 
     return ok({
       ...result,

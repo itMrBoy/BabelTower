@@ -788,6 +788,10 @@ export default function Home() {
 
   async function saveToDictionary() {
     if (!task || !snapshotVersion) return;
+    if (conflicts.hasBlocking) {
+      message.warning("存在未解决的 blocking 冲突，请先处理后再同步。");
+      return;
+    }
     if (!ensureNoEmptyPreviewValues("同步 Dictionary")) return;
     setBusy("save");
     try {
@@ -1268,7 +1272,7 @@ export default function Home() {
               <button className="ghost" type="button" disabled={!task || isWorking} onClick={validateCurrentTask}>
                 {busy === "validate" ? "校验中..." : "校验当前快照"}
               </button>
-              <button className="primary" type="button" disabled={!task || isWorking} onClick={saveToDictionary}>
+              <button className="primary" type="button" disabled={!task || isWorking || !snapshotVersion || conflicts.hasBlocking} onClick={saveToDictionary}>
                 {busy === "save" ? "同步中..." : "同步到 Dictionary"}
               </button>
             </div>
