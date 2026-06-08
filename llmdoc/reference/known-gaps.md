@@ -62,12 +62,12 @@ metadata:
 | 缺口 | 说明 |
 |------|------|
 | 无前端组件测试 | `@testing-library/react` 已安装但无 `.tsx` 测试文件 |
-| 无 API 路由测试 | Next.js API routes 未测试 |
+| API 路由测试不全 | 大部分 Next.js API routes 仍无测试，已有 `settings-maintenance`、`dictionaries-search` 两个路由的契约测试 |
 | 无数据库集成测试 | test job 使用真实 PostgreSQL，但测试代码中无直接 Prisma/数据库操作 |
 | 无 E2E 测试 | 无 Playwright/Cypress 配置 |
 | 覆盖率未强制执行 | CI 仅生成报告，无阈值检查 |
 
-当前 14 个测试文件覆盖：解析器、冲突检测、导出器、工具函数、性能、边界、集成。核心领域逻辑覆盖完整。
+当前 18 个测试文件覆盖：解析器、冲突检测、导出器、工具函数、性能、边界、集成、API 路由契约。核心领域逻辑覆盖完整。
 
 ## ESLint 配置问题
 
@@ -91,8 +91,13 @@ ignores: [
 |------|------|------|
 | 冲突检测 O(n*m) | `conflict-detector.ts` | 字典 5000 条 + 新文件 1000 条 = 500 万次比较，每次含正则替换和可能的 O(L^2) 相似度计算 |
 | 字典查询硬编码限制 | `tasks/route.ts`, `dictionaries/conflicts/route.ts` | `take: 5000` / `take: 500`，无分页机制 |
+| 字典搜索 contains 顺序扫描 | `dictionaries/route.ts` GET | 搜索用 `contains`（`LIKE '%x%'`）保证包含语义正确，但走顺序扫描、无法用 B-tree 索引。当前 50 条 / 预期 2 万条内无感（个位数~十几 ms，叠加前后端双层缓存）。**升级路标**：增长到约 10 万行并观测到变慢时，引入 PostgreSQL `pg_trgm` 扩展 + GIN 索引（`gin_trgm_ops`）让 `contains` 走索引。**勿回头改语义**：提交 `d32489c` 曾误用 `startsWith` 前缀搜索蹭索引、破坏包含语义，已修复，见下方「索引可加速性」说明 |
 | 大页面组件 | `src/app/page.tsx` | 约 1000 行，20+ state 变量，混合项目管理、文件导入、行编辑、字典搜索、导出 |
 | 无服务端分页 | API 层 | 大数据集（任务、字典条目、快照）可能导致性能问题 |
+
+### 索引可加速性（通用工程经验）
+
+B-tree 索引按序排列，只能加速**前缀查询**（`startsWith` / `LIKE 'x%'`），无法加速**包含查询**（`contains` / `LIKE '%x%'`）。**「为蹭索引把包含搜索改成前缀搜索」是破坏正确性的反模式**——前缀与包含是两种语义，改完功能就坏（搜「安全」漏掉「办公安全空间」）。包含搜索要走索引需上 trigram（`pg_trgm` + GIN，`gin_trgm_ops`），而非偷换语义。下次遇到「以性能为名」改动这类隐性语义前，先确认是否存在真实性能问题、改动是否改变了语义。
 
 ## 其他问题
 
@@ -102,4 +107,4 @@ ignores: [
 | 遗留类型文件 | `src/types.ts` 包含未使用的旧类型（I18nEntry, StandardJson, Conflict 等） |
 | 无部署 Job | CI 仅做质量检查，无自动部署到 staging/production |
 | Windows 构建差异 | `next.config.mjs` 在 Windows 平台禁用 `standalone` 输出，Docker 构建必须在 Linux 环境 |
-| Prisma config 复制 | Dockerfile 复制 `prisma.config.ts`，但 Prisma 6.x 通常不需要单独配置 |
+| Prisma config 复制（实现说明，非缺口） | Dockerfile 复制 `prisma.config.ts` 是必需步骤：builder 阶段 `prisma generate` 依赖它解析 schema 路径并注入占位 `DATABASE_URL`，详见 `reference/ci-and-tooling.md` 的「Docker 构建链」 |

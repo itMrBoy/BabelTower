@@ -58,20 +58,20 @@ export async function GET(request: NextRequest) {
     return ok({ items: cached });
   }
 
-  // Use startsWith when query length >= 2 to leverage B-tree index on normalized columns.
-  // Falls back to contains for shorter queries (more likely to need fuzzy match).
-  const usePrefixSearch = normalized.length >= 2;
-  const searchMode = usePrefixSearch ? "startsWith" : "contains";
-
+  // Substring (contains) search: a query must match anywhere in the field, including the
+  // middle and end — e.g. "安全" has to find "办公安全空间", not only fields starting with it.
+  // At current data scale this is a fast sequential scan; the front/back-end query caches
+  // absorb repeated lookups. See llmdoc/reference/known-gaps.md for the trigram-index upgrade
+  // path once the dictionary grows to ~100k rows.
   const where =
     field === "chinese"
-      ? { normalizedChinese: { [searchMode]: normalized, mode: "insensitive" as const } }
+      ? { normalizedChinese: { contains: normalized, mode: "insensitive" as const } }
       : field === "english"
-        ? { normalizedEnglish: { [searchMode]: normalized, mode: "insensitive" as const } }
+        ? { normalizedEnglish: { contains: normalized, mode: "insensitive" as const } }
         : {
             OR: [
-              { normalizedChinese: { [searchMode]: normalized, mode: "insensitive" as const } },
-              { normalizedEnglish: { [searchMode]: normalized, mode: "insensitive" as const } },
+              { normalizedChinese: { contains: normalized, mode: "insensitive" as const } },
+              { normalizedEnglish: { contains: normalized, mode: "insensitive" as const } },
             ],
           };
 
