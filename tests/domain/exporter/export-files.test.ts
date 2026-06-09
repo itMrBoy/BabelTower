@@ -45,6 +45,21 @@ describe('buildDualExportFiles', () => {
     expect(JSON.parse(result.files['en-us.json'])).toEqual({ title: 'Home' });
   });
 
+  it('adds -en suffix to translated file when uploaded filenames collide', () => {
+    const document = withTranslations(
+      parseJson('{"title":"首页"}', { sourceName: 'messages.json', locale: 'zh-CN' }),
+      { title: 'Home' },
+    );
+
+    const result = buildDualExportFiles(document, 'messages.json');
+
+    expect(Object.keys(result.files)).toEqual(['messages.json', 'messages-en.json']);
+    expect(result.sourceFilename).toBe('messages.json');
+    expect(result.targetFilename).toBe('messages-en.json');
+    expect(JSON.parse(result.files['messages.json'])).toEqual({ title: '首页' });
+    expect(JSON.parse(result.files['messages-en.json'])).toEqual({ title: 'Home' });
+  });
+
   it('preserves properties comments in source and translated files', () => {
     const document = withTranslations(
       parseProperties('! header\n\n# Page title\ntitle : 首页\n\n# tail', { sourceName: 'zh-cn.properties', locale: 'zh-CN' }),

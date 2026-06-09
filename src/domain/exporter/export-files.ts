@@ -41,6 +41,15 @@ export function buildTranslatedFilename(sourceFilename: string, targetFilename?:
   return `${dir}${base}.en-US${ext}`;
 }
 
+function appendEnglishSuffix(filename: string) {
+  const { dir, base, ext } = splitFilename(filename);
+  return `${dir}${base}-en${ext}`;
+}
+
+function isSameExportFilename(left: string, right: string) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
 function renderDocument(document: StandardI18nDocument, dictionaryPriority: boolean) {
   if (document.sourceFormat === 'properties') {
     return exportToProperties(document, { dictionaryPriority });
@@ -56,7 +65,10 @@ export function buildDualExportFiles(
   targetFilename?: string | null,
 ): ExportFilesResult {
   const sourceFilename = document.sourceName;
-  const translatedFilename = buildTranslatedFilename(sourceFilename, targetFilename);
+  const proposedTranslatedFilename = buildTranslatedFilename(sourceFilename, targetFilename);
+  const translatedFilename = isSameExportFilename(sourceFilename, proposedTranslatedFilename)
+    ? appendEnglishSuffix(proposedTranslatedFilename)
+    : proposedTranslatedFilename;
 
   return {
     sourceFilename,
