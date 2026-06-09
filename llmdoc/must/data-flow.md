@@ -59,6 +59,11 @@ metadata:
     v
 [API] POST /api/tasks/{id}/export
     |
+    +-- 选择当前行事实源
+    |       |
+    |       +-- DB: 优先读取 taskDraftRow，缺失时回退 snapshot.previewRows
+    |       +-- local-store: 使用 getLocalCurrentRows()（draftRows 优先，快照回退）
+    |
     +-- rowsToDocument()  --> StandardI18nDocument
     +-- buildDualExportFiles()
     |       |
@@ -137,3 +142,9 @@ UNRESOLVED  --[用户解决]-->  KEEP_EXISTING / UPDATE_DICTIONARY / IGNORE_SIMI
 | 行自动保存 | `task.update(latestVersion)` + `conflict.updateMany` + `snapshot.create` |
 | 手动快照 | `task.update(latestVersion)` + `snapshot.create` |
 | 保存到字典 | `dictionary.upsert` (逐条) + `revision.create` + `conflict.updateMany` + `snapshot.create` + `task.update` |
+
+## 导出前当前行事实源
+
+- DRAFT 任务导出不能只看 `TaskSnapshot.previewRows`，因为用户在 STEP 2 的最新编辑先进入暂存行；DB 模式下应优先读取 `taskDraftRow`，没有 draftRows 时才回退到快照行。
+- local-store 降级模式必须与 DB 模式保持一致：通过 `getLocalCurrentRows(taskId)` 取得当前行，内部同样是 draftRows 优先、快照回退。
+- 从 `/export` 页面触发导出前，如果首页存在未落库编辑缓冲，应先补调 `PATCH /api/tasks/{id}/rows`，再调用 `POST /api/tasks/{id}/export`，确保导出文件使用用户当前看到的 `PreviewRow.translatedValue`。
