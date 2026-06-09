@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { writeCurrentTask } from "@/lib/current-task";
+import { clearCurrentTaskDraftBuffer, writeCurrentTask, writeCurrentTaskDraftBuffer } from "@/lib/current-task";
 import {
   exportValidationKey,
   summarizeExportValidationErrors,
@@ -456,6 +456,31 @@ export default function Home() {
     };
   }, [hydrated, task?.id, rows.length]);
 
+  // 在冲突处理页解决冲突后切回本页时，组件重新挂载会从内存缓存恢复解决前的旧冲突摘要，
+  // 导致仍提示「去解决冲突」。这里按当前任务向服务端重新拉取未解决冲突摘要，使提示与服务端保持一致。
+  useEffect(() => {
+    if (!hydrated || !task?.id) return;
+    let cancelled = false;
+    const taskId = task.id;
+
+    async function refreshConflictSummary() {
+      try {
+        const response = await requestJson<{ conflictSummary: ConflictSummary }>(
+          `/api/tasks/${encodeURIComponent(taskId)}/conflicts?unresolvedOnly=true`,
+        );
+        if (cancelled) return;
+        setConflicts(response.conflictSummary);
+      } catch {
+        // 后台刷新失败不打扰用户，保留既有提示。
+      }
+    }
+
+    void refreshConflictSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, task?.id]);
+
   useEffect(() => {
     if (!task) return;
     writeCurrentTask({
@@ -594,6 +619,7 @@ export default function Home() {
       setTask(response.task);
       setRows(response.previewRows);
       setRowEdits({});
+      clearCurrentTaskDraftBuffer(response.task.id);
       setInvalidRequiredFields({});
       setSaveState("idle");
       setSnapshotVersion(response.latestSnapshot.version);
@@ -628,6 +654,7 @@ export default function Home() {
         },
       );
       for (const patch of payloadRows) pendingPatches.current.delete(patch.rowKey);
+      clearCurrentTaskDraftBuffer(task.id);
       if (response.currentVersion) setSnapshotVersion(response.currentVersion);
       setSaveState("saved");
       return true;
@@ -693,6 +720,7 @@ export default function Home() {
     const baseRow = mergedRows[index] ?? rows[index];
     if (!baseRow) return;
     const nextRow = { ...baseRow, [field]: value };
+    const nextRows = mergedRows.map((row, rowIndex) => (rowIndex === index ? nextRow : row));
     if (value.trim()) {
       setInvalidRequiredFields((current) => {
         if (!current[baseRow.key]?.[field]) return current;
@@ -719,6 +747,13 @@ export default function Home() {
       status: nextRow.status,
       conflictLevel: nextRow.conflictLevel,
     });
+    if (task && snapshotVersion) {
+      writeCurrentTaskDraftBuffer({
+        taskId: task.id,
+        baseVersion: snapshotVersion,
+        rows: rowsToPatches(nextRows),
+      });
+    }
   }
 
   async function saveDraft(kind: "auto" | "manual") {
@@ -750,6 +785,7 @@ export default function Home() {
         setRows(mergedRows);
         setRowEdits({});
         pendingPatches.current.clear();
+        clearCurrentTaskDraftBuffer(task.id);
         message.success(`手动快照已创建，当前版本 v${response.snapshot.version}。`);
       }
     } catch (error) {
@@ -813,6 +849,7 @@ export default function Home() {
       setConflicts(emptyConflictSummary);
       setRowEdits({});
       pendingPatches.current.clear();
+      clearCurrentTaskDraftBuffer(task.id);
       setSaveState("saved");
       message.success(`已同步 Dictionary，新增 ${result.dictionarySync?.created ?? 0}，更新 ${result.dictionarySync?.updated ?? 0}，跳过 ${result.dictionarySync?.skipped ?? 0}。`);
     } catch (error) {

@@ -4,7 +4,7 @@ import { validateDocument } from "@/domain/persistence/save-service";
 import type { PreviewRow, StandardI18nDocument } from "@/domain/standard-i18n/types";
 import { fail, ok } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { getLocalSnapshot, getLocalTask, isDatabaseUnavailable } from "@/lib/local-store";
+import { getLocalCurrentRows, getLocalSnapshot, getLocalTask, isDatabaseUnavailable } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import { draftRowsToPreviewRows, rowsToDocument } from "@/lib/standard";
 
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
       return fail("snapshot not found", 404);
     }
     const docs = snapshot.standardDocuments;
-    const rows = snapshot.previewRows;
+    const rows = getLocalCurrentRows(taskId);
     if (!docs.source) return fail("source document missing", 422);
 
     const document = rowsToDocument(rows, docs.source);

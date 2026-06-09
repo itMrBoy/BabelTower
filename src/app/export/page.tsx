@@ -3,7 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DownloadIcon, CheckIcon, AlertTriangleIcon } from "@/components/icons";
-import { readCurrentTask, subscribeCurrentTask, type CurrentTask } from "@/lib/current-task";
+import {
+  clearCurrentTaskDraftBuffer,
+  readCurrentTask,
+  readCurrentTaskDraftBuffer,
+  subscribeCurrentTask,
+  type CurrentTask,
+} from "@/lib/current-task";
 import {
   exportValidationMessage,
   summarizeExportValidationErrors,
@@ -56,6 +62,24 @@ export default function ExportPage() {
     setExporting(true);
         setValidationErrors([]);
     try {
+      const draftBuffer = readCurrentTaskDraftBuffer(currentTask.id);
+      if (draftBuffer && currentTask.status === "DRAFT") {
+        const saveResponse = await apiFetch(`/api/tasks/${encodeURIComponent(currentTask.id)}/rows`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baseVersion: draftBuffer.baseVersion,
+            rows: draftBuffer.rows,
+          }),
+        });
+        const saveText = await saveResponse.text();
+        const saveBody = (saveText ? JSON.parse(saveText) : {}) as ExportResponse;
+        if (!saveResponse.ok) {
+          throw new Error(saveBody.error?.message ?? `暂存失败 (HTTP ${saveResponse.status})`);
+        }
+        clearCurrentTaskDraftBuffer(currentTask.id);
+      }
+
       const response = await apiFetch(`/api/tasks/${encodeURIComponent(currentTask.id)}/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
