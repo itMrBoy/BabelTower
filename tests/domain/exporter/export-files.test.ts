@@ -72,6 +72,28 @@ describe('buildDualExportFiles', () => {
     expect(result.files['en-us.properties']).toBe('! header\n\n# Page title\ntitle : Home\n\n# tail\n');
   });
 
+  it('uses uploaded target properties template so translated comments are not lost', () => {
+    const document = withTranslations(
+      parseProperties('# source title\ntitle=首页\n# source subtitle\nsubtitle=副标题', {
+        sourceName: 'zh-cn.properties',
+        locale: 'zh-CN',
+      }),
+      { title: 'Home', subtitle: 'Subtitle' },
+    );
+    const targetDocument = parseProperties('! translated header\n\n# target title\ntitle=Old home\n', {
+      sourceName: 'en-us.properties',
+      locale: 'en-US',
+    });
+
+    const result = buildDualExportFiles(document, 'en-us.properties', { targetDocument });
+
+    expect(result.files['zh-cn.properties']).toContain('# source title');
+    expect(result.files['en-us.properties']).toContain('! translated header');
+    expect(result.files['en-us.properties']).toContain('# target title');
+    expect(result.files['en-us.properties']).toContain('title=Home');
+    expect(result.files['en-us.properties']).toContain('# source subtitle\nsubtitle=Subtitle');
+  });
+
   it('preserves TS comments and file type while replacing translated values', () => {
     const document = withTranslations(
       parseTs(
@@ -92,6 +114,38 @@ describe('buildDualExportFiles', () => {
     expect(result.files['zh-cn.ts']).toContain('// locale file');
     expect(result.files['zh-cn.ts']).toContain("title: '首页'");
     expect(result.files['en-us.ts']).toContain('// title copy');
+    expect(result.files['en-us.ts']).toContain("title: 'Home'");
+  });
+
+  it('uses uploaded target TS template for translated file comments', () => {
+    const document = withTranslations(
+      parseTs(
+        [
+          '// source locale file',
+          'export default {',
+          "  title: '首页',",
+          '};',
+        ].join('\n'),
+        { sourceName: 'zh-cn.ts', locale: 'zh-CN' },
+      ),
+      { title: 'Home' },
+    );
+    const targetDocument = parseTs(
+      [
+        '// target locale file',
+        'export default {',
+        '  // translated title',
+        "  title: 'Old home',",
+        '};',
+      ].join('\n'),
+      { sourceName: 'en-us.ts', locale: 'en-US' },
+    );
+
+    const result = buildDualExportFiles(document, 'en-us.ts', { targetDocument });
+
+    expect(result.files['zh-cn.ts']).toContain('// source locale file');
+    expect(result.files['en-us.ts']).toContain('// target locale file');
+    expect(result.files['en-us.ts']).toContain('// translated title');
     expect(result.files['en-us.ts']).toContain("title: 'Home'");
   });
 });

@@ -42,7 +42,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
       return fail("snapshot not found", 404);
     }
 
-    const docs = snapshot.standardDocuments as { source?: StandardI18nDocument } | null;
+    const docs = snapshot.standardDocuments as { source?: StandardI18nDocument; target?: StandardI18nDocument | null } | null;
     const draftRows = await prisma.taskDraftRow.findMany({ where: { taskId }, orderBy: { rowIndex: "asc" } });
     const rows = draftRows.length > 0 ? draftRowsToPreviewRows(draftRows) : (snapshot.previewRows as unknown as PreviewRow[]);
     if (!docs?.source) return fail("source document missing", 422);
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     const translatedErrors = validateTranslatedRows(rows);
     if (translatedErrors.length > 0) return ok({ valid: false, validationErrors: translatedErrors }, 422);
 
-    const result = buildDualExportFiles(document, snapshot.task.targetFilename);
+    const result = buildDualExportFiles(document, snapshot.task.targetFilename, { targetDocument: docs.target });
     return ok({ files: result.files, fileBaseName: body.fileBaseName ?? result.sourceFilename });
   } catch (error) {
     if (!isDatabaseUnavailable(error)) {
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
       return ok({ valid: false, validationErrors: translatedErrors, localFallback: true }, 422);
     }
 
-    const result = buildDualExportFiles(document, task?.targetFilename);
+    const result = buildDualExportFiles(document, task?.targetFilename, { targetDocument: docs.target });
     return ok({ files: result.files, fileBaseName: body.fileBaseName ?? result.sourceFilename, localFallback: true });
   }
 }

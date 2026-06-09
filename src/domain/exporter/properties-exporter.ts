@@ -48,6 +48,7 @@ function exportWithTemplate(
   if (typeof template !== 'string') return null;
 
   const replacements: Array<{ start: number; end: number; value: string }> = [];
+  const appendedLines: string[] = [];
   for (const entry of document.entries) {
     if (entry.status === 'UNSUPPORTED_VALUE' && entry.sourceValue === null) continue;
 
@@ -58,17 +59,36 @@ function exportWithTemplate(
 
     const start = Number(entry.metadata?.propertiesValueStart);
     const end = Number(entry.metadata?.propertiesValueEnd);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
-    replacements.push({ start, end, value: escapeValue(value) });
+    if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+      replacements.push({ start, end, value: escapeValue(value) });
+    } else {
+      appendedLines.push(...renderEntryLines(entry, value));
+    }
   }
 
-  if (replacements.length === 0) return null;
+  if (replacements.length === 0 && appendedLines.length === 0) return null;
 
   let output = template;
   for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
     output = output.slice(0, replacement.start) + replacement.value + output.slice(replacement.end);
   }
-  return output.endsWith('\n') ? output : output + '\n';
+  output = output.endsWith('\n') ? output : output + '\n';
+  if (appendedLines.length > 0) {
+    output += `${appendedLines.join('\n')}\n`;
+  }
+  return output;
+}
+
+function renderEntryLines(entry: StandardI18nEntry, value: string) {
+  const lines: string[] = [];
+  if (entry.metadata?.comment) {
+    const commentLines = entry.metadata.comment.split('\n');
+    for (const cl of commentLines) {
+      lines.push(`# ${cl}`);
+    }
+  }
+  lines.push(`${entry.key}=${escapeValue(value)}`);
+  return lines;
 }
 
 /**
@@ -101,15 +121,7 @@ export function exportToProperties(
 
     if (value === null) continue;
 
-    // Write leading comment if available
-    if (entry.metadata?.comment) {
-      const commentLines = entry.metadata.comment.split('\n');
-      for (const cl of commentLines) {
-        lines.push(`# ${cl}`);
-      }
-    }
-
-    lines.push(`${entry.key}=${escapeValue(value)}`);
+    lines.push(...renderEntryLines(entry, value));
   }
 
   return lines.join('\n') + '\n';

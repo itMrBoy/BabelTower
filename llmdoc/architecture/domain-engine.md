@@ -198,6 +198,8 @@ JaroWinkler = Jaro + prefixLen * 0.1 * (1 - Jaro)
 `src/domain/exporter/export-files.ts` (`buildDualExportFiles`)
 
 - 生成两个文件：**源文件**（`dictionaryPriority: false`，保留中文）和 **翻译文件**（`dictionaryPriority: true`，使用英文）
+- 单文件导出时，翻译文件沿用源文件模板/注释；双文件导入时，翻译文件优先使用目标文件 `standardDocuments.target` 的模板/注释，再按 key 写入当前译文，避免丢失目标文件中已有的 header、注释和排版。
+- `.properties` 目标模板缺少源文件里的 key 时，模板导出会保留已有模板并把缺失 key 追加到文件末尾，而不是整体回退为纯生成模式。
 - 翻译文件名通过 `buildTranslatedFilename` 自动推断：
   - 替换语言标记：`zh-cn` → `en-us`，`zh` → `en`，`中文` → `英文`
   - 如无标记，追加 `.en-US` 后缀
