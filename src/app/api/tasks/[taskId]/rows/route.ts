@@ -10,6 +10,10 @@ import {
 } from "@/lib/local-store";
 import { prisma } from "@/lib/prisma";
 import { chineseHash, normalizeText, type PreviewRowPatch } from "@/lib/standard";
+import {
+  groupResolvedConflictsByResolution,
+  type ResolvedConflictInput,
+} from "@/lib/conflict-resolution";
 
 const writableResolutions = new Set<string>([
   ConflictResolution.KEEP_EXISTING,
@@ -17,11 +21,6 @@ const writableResolutions = new Set<string>([
   ConflictResolution.IGNORE_SIMILAR,
   ConflictResolution.EDIT_ROW,
 ]);
-
-type ResolvedConflictInput = {
-  key: string;
-  resolution: ConflictResolution;
-};
 
 function parseResolvedConflicts(value: unknown): ResolvedConflictInput[] {
   if (!Array.isArray(value)) return [];
@@ -77,10 +76,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
     const result = await prisma.$transaction(async (tx) => {
       if (resolvedConflicts.length > 0) {
         const resolvedAt = new Date();
-        for (const item of resolvedConflicts) {
+        for (const [resolution, keys] of groupResolvedConflictsByResolution(resolvedConflicts)) {
           await tx.dictionaryConflict.updateMany({
-            where: { taskId, candidateKey: item.key, resolvedAt: null },
-            data: { resolvedAt, resolution: item.resolution, resolvedById: currentUser.id },
+            where: { taskId, candidateKey: { in: keys }, resolvedAt: null },
+            data: { resolvedAt, resolution, resolvedById: currentUser.id },
           });
         }
       }
@@ -162,7 +161,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
         conflictSummary: groups.length > 0 ? summarizeConflictGroups(groups) : undefined,
         target: task.status === TaskStatus.SAVED ? "official" : "draft",
       };
-    });
+    },
+    // 批量解决冲突可能同时 upsert 多行并标记大量 dictionaryConflict;
+    // Prisma 默认 5s 事务超时在“全部同步并标记”时容易过期。
+    { maxWait: 5_000, timeout: 30_000 });
 
     return ok(result);
   } catch (error) {

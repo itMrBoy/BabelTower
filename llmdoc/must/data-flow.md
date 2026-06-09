@@ -43,7 +43,7 @@ metadata:
     |
     +-- DRAFT 状态: upsert taskDraftRow (按 taskId+rowKey)
     +-- SAVED 状态: upsert dictionary + dictionaryRevision
-    +-- 标记冲突已解决
+    +-- 标记冲突已解决 (批量场景按 resolution 分组 updateMany)
     +-- 重新计算冲突摘要
     |
     v
@@ -68,7 +68,7 @@ metadata:
     +-- buildDualExportFiles()
     |       |
     |       +-- 源文件 (dictionaryPriority: false)
-    |       +-- 翻译文件 (dictionaryPriority: true, 自动推断文件名)
+    |       +-- 翻译文件 (dictionaryPriority: true, 自动推断文件名；双文件导入时优先使用目标文件模板/注释)
     |
     v
 下载两个文件
@@ -143,8 +143,11 @@ UNRESOLVED  --[用户解决]-->  KEEP_EXISTING / UPDATE_DICTIONARY / IGNORE_SIMI
 | 手动快照 | `task.update(latestVersion)` + `snapshot.create` |
 | 保存到字典 | `dictionary.upsert` (逐条) + `revision.create` + `conflict.updateMany` + `snapshot.create` + `task.update` |
 
+> 注意：`PATCH /api/tasks/{id}/rows` 也服务冲突页“同步并标记解决 / 全部同步并标记”。当请求包含多条 `resolvedConflicts` 时，后端应按 resolution 批量 `dictionaryConflict.updateMany(candidateKey in ...)`，并使用 30s 事务 timeout；不要在 Prisma 默认 5s 事务里逐条更新大量冲突。
+
 ## 导出前当前行事实源
 
 - DRAFT 任务导出不能只看 `TaskSnapshot.previewRows`，因为用户在 STEP 2 的最新编辑先进入暂存行；DB 模式下应优先读取 `taskDraftRow`，没有 draftRows 时才回退到快照行。
 - local-store 降级模式必须与 DB 模式保持一致：通过 `getLocalCurrentRows(taskId)` 取得当前行，内部同样是 draftRows 优先、快照回退。
 - 从 `/export` 页面触发导出前，如果首页存在未落库编辑缓冲，应先补调 `PATCH /api/tasks/{id}/rows`，再调用 `POST /api/tasks/{id}/export`，确保导出文件使用用户当前看到的 `PreviewRow.translatedValue`。
+- 双文件导入的导出不能只用源文件模板。源文件导出使用 `standardDocuments.source`；译文文件导出应优先使用 `standardDocuments.target` 的模板/metadata 来保留目标文件注释、header 和排版，再按当前行事实源替换译文值。

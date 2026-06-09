@@ -130,12 +130,14 @@ metadata:
 **行为**：
 - 验证 `baseVersion === task.latestVersion`，不匹配返回 409
 - 如提供 `resolvedConflicts`，更新 `dictionaryConflict` 记录，并写入当前用户为 `resolvedById`
+- 批量冲突解决（冲突页“全部同步并标记”）会按 `resolution` 分组批量 `updateMany(candidateKey in ...)`，避免在默认 5s 事务里逐条更新大量冲突；该路由的批量写事务使用 30s timeout
 - **任务状态决定存储目标**：
   - `DRAFT` 状态：将行数据 upsert 到 `taskDraftRow` 表（按 `taskId + rowKey` 唯一键）
   - `SAVED` 状态：直接 upsert `dictionary` 并创建 `dictionaryRevision` 审计记录
   - 其他状态：返回错误
 - 重新计算未解决冲突摘要
 - **不再创建 AUTOSAVED 快照**（仅更新 draftRows 或 dictionary）
+- **不递增 latestVersion**（仍校验 `baseVersion`，但返回 `currentVersion: task.latestVersion`）
 - 返回 `{ currentVersion, conflictSummary?, target: "draft" | "official" }`
 
 ### 保存任务 (POST `/api/tasks/{id}/save`)
@@ -180,6 +182,8 @@ metadata:
 - 加载快照，验证文档
 - 验证失败返回 422 `{ valid: false, validationErrors }`
 - 根据 sourceFormat 选择导出器，`dictionaryPriority: true`
+- 当前行事实源优先使用 `taskDraftRow`；无 draftRows 时回退 `snapshot.previewRows`
+- 双文件导入时，源文件导出使用 `standardDocuments.source` 模板；译文文件导出优先使用 `standardDocuments.target` 模板/注释，再按 key 写入当前译文
 
 **响应**：
 ```typescript
@@ -190,7 +194,7 @@ metadata:
 }
 ```
 
-**注意**：返回 JSON 对象（含文件内容字符串），包含两个文件：源文件（保留中文）和翻译文件（使用英文译文）。客户端用 Blob/URL.createObjectURL 处理下载。翻译文件名通过 `buildTranslatedFilename` 自动推断。
+**注意**：返回 JSON 对象（含文件内容字符串），包含两个文件：源文件（保留中文）和翻译文件（使用英文译文）。客户端用 Blob/URL.createObjectURL 处理下载。翻译文件名通过 `buildTranslatedFilename` 自动推断；如果上传了目标文件名则优先使用目标文件名。
 
 ### 验证任务 (POST `/api/tasks/{id}/validate`)
 
@@ -297,8 +301,9 @@ metadata:
 
 1. 前端提交 `baseVersion`
 2. 后端检查 `task.latestVersion === baseVersion`
-3. 匹配则 `latestVersion++` 并创建新 snapshot
-4. 不匹配返回 409
+3. `POST /api/tasks/{id}/snapshot` 匹配后 `latestVersion++` 并创建新 snapshot
+4. `PATCH /api/tasks/{id}/rows` 只校验版本并写 draftRows/dictionary，不创建快照、不递增版本
+5. 不匹配返回 409
 
 ## 数据库降级模式
 
