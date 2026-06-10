@@ -9,33 +9,27 @@
 | `DATABASE_URL` | PostgreSQL 连接字符串（Prisma 通过 `env("DATABASE_URL")` 注入） | `postgresql://user:pass@host:5432/db?schema=public` |
 | `NODE_ENV` | 运行环境，影响 Prisma 日志级别 | `development` / `test` / `production` |
 | `PORT` | 应用端口（默认 3000） | `3000` |
+| `AUTH_COOKIE_SECURE` | session cookie 的 `Secure` 属性开关，未设置时生产默认 `true`。**当前 HTTP 直访部署必须设 `false`**（否则浏览器丢弃 cookie，登录后接口一律 401「请先登录」）；引入 HTTPS 后改回 `true` | `false` |
 
-仓库内已经登记了三份模板，请按目标环境复制：
-
-| 文件 | 用途 | 是否提交到仓库 |
-|------|------|--------------|
-| `.env.example` | 本地开发模板（与 docker-compose 默认凭据一致） | 是（模板，无敏感值） |
-| `.env.test.example` | CI / 本地测试模板（与 ci.yml postgres service 凭据一致） | 是（模板） |
-| `.env.prod.example` | 生产模板，仅列出变量清单，实际值通过 secret 注入 | 是（模板） |
+仓库内仅保留一份模板 `.env.example`（本地开发用，与 docker-compose 默认凭据一致）：
 
 ```bash
 # 本地开发
 cp .env.example .env
-
-# 本地跑测试 (vitest)
-cp .env.test.example .env.test
-
-# 生产部署：参考 .env.prod.example 列出的变量，由部署平台/CI secret 注入
 ```
 
-> ⚠️ `.env`、`.env.test`、`.env.prod` 等实际文件已在 `.gitignore` 中，不要提交。
+> ⚠️ `.env` 等实际文件已在 `.gitignore` 中，不要提交。
+>
+> **不存在 `.env.test` / `.env.prod` 文件**：测试的 `DATABASE_URL` 由 CI workflow `env:` 直接注入；
+> 生产环境变量全部写在 `docker-compose.yml` 的 `environment:` 块，随 GitLab tag 流水线部署生效，
+> 没有任何机制会读取宿主机上的 env 文件。
 
 > 📦 本项目统一使用 **pnpm**（`packageManager: pnpm@10.33.2`），仓库仅保留 `pnpm-lock.yaml`。
 > 所有命令请使用 pnpm；如未安装可执行 `corepack enable`，让 Node 24 自带的 corepack 按 `package.json` 固定的版本启用 pnpm。
 
 ## 本地部署
 
-### 方式一：Docker Compose（推荐）
+### Docker Compose
 
 ```bash
 # 拉取并启动所有服务（PostgreSQL + Next.js）
@@ -56,6 +50,19 @@ curl http://localhost:3000/api/health
 docker compose down
 ```
 
+常用日志命令：
+
+```bash
+# 最近 200 行应用日志
+docker compose logs --tail=200 app
+
+# 持续跟踪最近 200 行应用日志
+docker compose logs -f --tail=200 app
+
+# 同时查看应用和数据库日志
+docker compose logs -f app db
+```
+
 > 初始管理员账号 **admin / Snow@123**：如需落库，可在宿主机连同一数据库执行 `pnpm exec prisma db seed`；
 > 数据库不可用时系统会自动降级到内存存储并内置同一账号。首次登录后请尽快修改密码。
 
@@ -69,126 +76,43 @@ docker compose --profile dev up -d app-dev
 > Dockerfile 依赖 Next.js 的 `output: "standalone"` 输出（已在 `next.config.mjs` 中针对 Linux/Docker 开启），
 > 升级 Next.js 大版本时请确认该配置保留，否则 `COPY --from=builder /app/.next/standalone` 会失败。
 
-### 方式二：手动部署（宿主机）
-
-```bash
-# 安装依赖（仓库仅保留 pnpm-lock.yaml）
-corepack enable                 # 如本机尚未启用 pnpm
-pnpm install --frozen-lockfile
-
-# 生成 Prisma Client（pnpm install 的 postinstall 已自动执行，此处可显式重跑）
-pnpm exec prisma generate
-
-# 初始化数据库
-pnpm exec prisma db push
-
-# 创建初始管理员（admin / Snow@123）
-pnpm exec prisma db seed
-
-# 构建
-pnpm build
-
-# 启动
-pnpm start
-```
-
-## 测试环境部署
-
-```bash
-# 1. 配置测试数据库
-cp .env.test.example .env.test
-# 按需调整 DATABASE_URL
-
-# 2. 安装依赖并构建
-pnpm install --frozen-lockfile
-pnpm exec prisma generate
-pnpm exec prisma db push
-pnpm build
-
-# 3. 启动（端口 3001）
-PORT=3001 pnpm start
-```
-
 ## 生产环境部署
 
-### Docker 单机部署
+> **生产唯一部署路径 = GitLab tag 流水线 + Docker Compose**（见下方「CI / 自动化」）。
+> **永远不存在宿主机直接跑运行命令**（`pnpm build` / `pnpm start` / PM2 等）的部署形态，
+> 也不使用 Vercel 等云平台托管。服务器日志一律以 `docker compose logs -f app` 为准。
+
+部署机上由流水线 deploy job 执行的核心动作等价于：
 
 ```bash
-# 1. 构建镜像
-docker build -t babeltower:latest .
+# 启动（复用 build 阶段镜像，不带 --build；永不 down -v）
+docker compose up -d db app
 
-# 2. 运行（通过环境变量注入生产配置）
-docker run -d \
-  --name babeltower \
-  -p 3000:3000 \
-  -e DATABASE_URL="postgresql://user:strongpass@db-host:5432/babeltower?schema=public" \
-  -e NODE_ENV=production \
-  babeltower:latest
-
-# 3. 初始化数据库（容器内使用全局 prisma CLI）
-docker exec babeltower prisma db push --skip-generate
-```
-
-### Docker Compose 生产部署
-
-编辑 `docker-compose.yml`，确保：
-- `db` 服务使用强密码
-- `app-dev` 通过 `profiles: [dev]` 隔离（默认不会启动）
-- 挂载 PostgreSQL 数据卷到宿主机持久化
-
-```bash
-# 启动
-docker compose up -d --build
-
-# 运行迁移（standalone 镜像内用全局 prisma；--skip-generate 因为 Client 已在构建时生成）
+# 同步表结构（standalone 镜像内用全局 prisma；--skip-generate 因为 Client 已在构建时生成）
 docker compose exec app prisma db push --skip-generate
 
 # 健康检查
 curl http://localhost:3000/api/health
 ```
 
-### 云平台部署
-
-BabelTower 是标准 Next.js 应用，可部署到任何支持 Node.js 的平台：
-
-#### Vercel（推荐用于全托管）
-
-1. 连接 GitHub 仓库（Vercel 会自动识别 `pnpm-lock.yaml` 并用 pnpm 安装）
-2. 设置环境变量 `DATABASE_URL`
-3. 部署
-
-#### 自建服务器（Ubuntu 示例）
-
-```bash
-# 安装 Node.js 24
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# 启用 pnpm（Node 24 自带 corepack）
-corepack enable
-
-# 安装 PostgreSQL
-sudo apt-get install -y postgresql
-sudo -u postgres createuser babeltower -P
-sudo -u postgres createdb babeltower -O babeltower
-
-# 部署应用
-git clone https://github.com/itMrBoy/BabelTower.git
-cd BabelTower
-pnpm install --frozen-lockfile
-pnpm exec prisma generate
-pnpm exec prisma db push
-pnpm exec prisma db seed        # 创建初始管理员 admin / Snow@123
-pnpm build
-
-# 使用 PM2 管理进程
-npm install -g pm2
-pm2 start pnpm --name babeltower -- start
-pm2 save
-pm2 startup
-```
+`docker-compose.yml` 注意事项：
+- `db` 服务使用强密码
+- `app-dev` 通过 `profiles: [dev]` 隔离（默认不会启动）
+- 挂载 PostgreSQL 数据卷到宿主机持久化
 
 ## CI / 自动化
+
+### 生产发版：GitLab tag 流水线
+
+生产发版走自建 GitLab（git.snowsse.cn）的 `.gitlab-ci.yml` 流水线：
+
+- 仅人工打规范版本号 tag `vX.Y.Z` 触发，平时 push / MR 不跑；CI 修复需打新 tag 验证（retry 旧 tag 跑的是旧 yaml）。
+- 三阶段 check → build → deploy **全自动**（build 成功后 deploy 自动执行）；仅 `seed_admin` 保留手动（首次发版后在 GitLab UI 点一次，初始化管理员）。
+- 阶段细节、runner 宿主机环境清单见 `llmdoc/reference/gitlab-release-pipeline.md`。
+
+**部署后访问形态（有意决策，勿"补"nginx 配置）**：应用通过 IP+端口直访 `http://10.2.0.105:3000`，不经 nginx、不占宿主机 80 默认站点；后续多应用按端口区分，需要 TLS/域名分流时再引入反向代理。
+
+### 日常质量 CI：GitHub Actions
 
 `.github/workflows/ci.yml` 共定义 6 个 Job，统一通过 pnpm 执行（`pnpm/action-setup` + `actions/setup-node@v4`（Node 24，`cache: pnpm`），每个 job 先 `pnpm install --frozen-lockfile`）：
 
@@ -204,13 +128,8 @@ pm2 startup
 ### CI 中的 secret 注入
 
 - workflow 顶层 `env:` 已注入占位 `DATABASE_URL`，供 `pnpm install` 的 postinstall（`prisma generate`）及 schema-only 操作使用，无需真实连通。
-- `test`：使用 GitHub Actions 提供的 `postgres:17-alpine` service container，连接串 `postgresql://babeltower:babeltower@localhost:5432/babeltower_test?schema=public`，与 `.env.test.example` 保持一致。
-- 真实生产数据库 URL 必须存放在 **GitHub Secrets**，并通过 `secrets.PROD_DATABASE_URL`（或同名）注入到部署 job（当前 workflow 仅含 CI，部署 job 需另行追加）：
-  ```yaml
-  - run: pnpm exec prisma migrate deploy
-    env:
-      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-  ```
+- `test`：使用 GitHub Actions 提供的 `postgres:17-alpine` service container，连接串在 workflow `env:` 中直接注入（`postgresql://babeltower:babeltower@localhost:5432/babeltower_test?schema=public`），不依赖任何 env 文件。
+- GitHub Actions **不承担部署职责**（生产发版只走 GitLab tag 流水线），无需在 GitHub Secrets 存放生产数据库 URL。
 
 ## 数据库迁移策略
 
@@ -218,8 +137,8 @@ pm2 startup
 # 开发：Schema 变更后
 pnpm exec prisma migrate dev --name describe_your_change
 
-# 生产：应用迁移（不丢失数据）
-pnpm exec prisma migrate deploy
+# 生产：应用迁移（不丢失数据；在部署机容器内执行，镜像内为全局 prisma CLI）
+docker compose exec app prisma migrate deploy
 
 # 紧急：直接推送（跳过迁移历史，仅限开发/测试）
 pnpm exec prisma db push
