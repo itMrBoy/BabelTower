@@ -27,8 +27,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
-# Prisma 生成文件在 builder 阶段创建，必须从 builder 复制
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# Prisma 生成文件在 builder 阶段创建，必须从 builder 复制；
+# pnpm 布局下产物位于 .pnpm 虚拟存储内（根 node_modules 无 .prisma），
+# 通配符兼容版本号变化，落到根 node_modules/.prisma 供运行时沿目录树向上解析
+COPY --from=builder /app/node_modules/.pnpm/@prisma+client@*/node_modules/.prisma ./node_modules/.prisma
 
 # 安装与项目兼容的 Prisma CLI（standalone 产物内无 pnpm，容器内执行迁移/推送时用全局 prisma）
 RUN npm install -g prisma@^6.7.0
