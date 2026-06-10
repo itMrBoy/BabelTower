@@ -23,7 +23,7 @@ metadata:
 
 ## 鉴权与权限
 
-- `POST /api/auth/login` 使用账号密码登录，成功后写入 8 小时 HttpOnly Cookie。
+- `POST /api/auth/login` 使用账号密码登录，成功后写入 8 小时 HttpOnly Cookie。Cookie 的 Secure 属性由环境变量 `AUTH_COOKIE_SECURE` 控制（未设置时生产默认 true）；部署形态对该变量的要求见 [`reference/gitlab-release-pipeline.md`](../reference/gitlab-release-pipeline.md)「部署访问形态」。
 - Cookie token 包含 `userId`、`username`、`role`、`tokenVersion`、`exp` 并做 HMAC 签名。
 - 受保护 API 每次先校验 token 签名和过期时间，再校验服务端用户状态缓存/数据库中的 `isActive` 与 `tokenVersion`。
 - 用户禁用、启用、改密码、删除后会清理用户状态缓存；禁用用户下一次受保护 API 请求返回 401。

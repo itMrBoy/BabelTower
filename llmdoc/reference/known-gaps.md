@@ -103,6 +103,7 @@ B-tree 索引按序排列，只能加速**前缀查询**（`startsWith` / `LIKE 
 
 | 问题 | 说明 |
 |------|------|
+| AUTH_SECRET 未注入（生产隐患，未修） | `src/lib/auth.ts:43-49`（`secret()`）在 `AUTH_SECRET`/`NEXTAUTH_SECRET` 均未设置时 fallback 到 `randomBytes(32)` 随机生成签名密钥，而 docker-compose.yml 未注入 AUTH_SECRET → **每次容器重启所有用户 session 全部失效**（被迫重登）；多实例部署下各实例 token 互不认。修法：生产 compose 注入固定强随机 `AUTH_SECRET`（2026-06-10 排障时发现，见 `memory/reflections/2026-06-10-prod-login-secure-cookie-seed-admin.md`） |
 | 无错误边界 | 无全局错误处理组件 |
 | 遗留类型文件 | `src/types.ts` 包含未使用的旧类型（I18nEntry, StandardJson, Conflict 等） |
 | 无部署 Job | CI 仅做质量检查，无自动部署到 staging/production |

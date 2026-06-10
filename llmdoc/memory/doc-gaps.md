@@ -14,7 +14,7 @@ metadata:
 - [ ] **测试文档**：测试策略、fixtures 说明、性能预算维护指南
 - [x] **运维文档：部署流程 + 环境配置**：已由根目录 [`DEPLOYMENT.md`](../../DEPLOYMENT.md) 覆盖
 - [ ] **运维文档：监控与告警**：仍缺失
-- [x] **CI/CD 文档**：已由 [`reference/ci-and-tooling.md`](../reference/ci-and-tooling.md) 与 `DEPLOYMENT.md` 的「CI/自动化」覆盖
+- [x] **CI/CD 文档**：已由 [`reference/ci-and-tooling.md`](../reference/ci-and-tooling.md)、[`reference/gitlab-release-pipeline.md`](../reference/gitlab-release-pipeline.md)（GitLab tag 发版流水线 + runner 宿主机环境清单）与 `DEPLOYMENT.md` 的「CI/自动化」覆盖
 
 ## 已记录的实现缺口
 
