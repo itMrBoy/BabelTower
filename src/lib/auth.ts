@@ -97,7 +97,11 @@ export function sessionCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    // 生产部署为 IP+端口 HTTP 直访（无 TLS，见 DEPLOYMENT.md），Secure cookie 会被浏览器丢弃导致登录后仍 401。
+    // 故允许 AUTH_COOKIE_SECURE 显式覆盖（"true"/"false"）；未设置时保持原行为（生产默认 Secure）。
+    secure: process.env.AUTH_COOKIE_SECURE
+      ? process.env.AUTH_COOKIE_SECURE === "true"
+      : process.env.NODE_ENV === "production",
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   };

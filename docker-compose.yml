@@ -29,6 +29,9 @@ services:
       DATABASE_URL: "postgresql://babeltower:babeltower@db:5432/babeltower?schema=public"
       NODE_ENV: production
       PORT: "3000"
+      # 部署形态为 IP+端口 HTTP 直访（无 TLS），必须关闭 Secure cookie，否则浏览器丢弃 session cookie 导致登录后 401。
+      # 将来引入 HTTPS/反向代理后改回 "true"。
+      AUTH_COOKIE_SECURE: "false"
     depends_on:
       db:
         condition: service_healthy
