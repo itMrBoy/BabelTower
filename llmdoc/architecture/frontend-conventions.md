@@ -55,3 +55,16 @@ metadata:
 - 因此跨页面动作如果依赖用户最新输入（典型是 `/export` 生成译文文件），不能只依赖 `current-task.ts` 中的当前任务元数据；必须先确保最新 `PreviewRow` 已 flush 到服务端。
 - `src/lib/current-task.ts` 除当前任务元数据外，还维护 `CurrentTaskDraftBuffer`（`taskId`、`baseVersion`、完整当前行补丁）。首页 `updateRow` 每次编辑都写 buffer；成功实时暂存、导入新任务、手动快照或同步字典后清理 buffer。
 - `/export` 页导出前读取同任务 buffer；若任务仍是 `DRAFT`，先调用 `PATCH /api/tasks/{id}/rows` 补暂存，成功后再调用 `POST /api/tasks/{id}/export`。这样导出使用用户当前看到的译文，而不是旧快照/旧暂存行。
+
+## 登录态失效原因透传
+
+- 后端 `requireUser()` 会区分普通未登录/过期与同账号新登录顶下线：后者返回 401 并设置 `x-auth-reason: superseded`。
+- `AuthProvider` 首屏和 `refresh()` 调 `/api/auth/me` 时会读取该 header，路由守卫跳转登录页时追加 `reason=superseded`；登录页据此展示「该账号已在其他设备登录」提示。
+- `src/lib/http-client.ts` 的 `apiFetch()` 在业务请求收到 401/403 时会触发 `babeltower:auth-expired`，并把 `x-auth-reason` 拼到登录页 URL。新写前端请求应优先走 `requestJson()` / `apiFetch()`，避免绕过统一登录态失效处理。
+- 普通未登录、过期或无效 token 不带 `reason`，登录页只保留默认登录表单，避免误导用户。
+
+## 剪贴板复制兼容 HTTP 直访
+
+- 生产部署当前是 HTTP + IP 直访，不是浏览器安全上下文；`navigator.clipboard.writeText()` 可能不可用或被拒绝。
+- 复制密码、复制链接等用户关键动作应统一使用 `src/lib/clipboard.ts` 的 `copyTextToClipboard(text)`：优先 Clipboard API，失败后降级到临时 `textarea` + `document.execCommand("copy")`。
+- 调用方按布尔返回值给 toast 反馈；不要直接调用 `navigator.clipboard.writeText()`，否则 HTTP 直访下可能静默失败或抛错。

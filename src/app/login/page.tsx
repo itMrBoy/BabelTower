@@ -16,6 +16,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const next = searchParams.get("next") || "/";
+  // 会话被其他设备登录顶下线（单会话互踢），跳转登录页时由 reason=superseded 标记。
+  const superseded = searchParams.get("reason") === "superseded";
 
   useEffect(() => {
     if (user) router.replace(next);
@@ -42,6 +44,11 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid place-items-center px-4">
       <form className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm" onSubmit={submit}>
+        {superseded ? (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            该账号已在其他设备登录，当前会话已下线。如非本人操作，请尽快修改密码。
+          </div>
+        ) : null}
         <div className="mb-6 flex items-center gap-3">
           <img src="/babeltower-icon.svg" alt="BabelTower" className="h-10 w-10 rounded-lg bg-white" />
           <div>

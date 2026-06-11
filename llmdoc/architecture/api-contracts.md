@@ -25,7 +25,9 @@ metadata:
 
 - `POST /api/auth/login` 使用账号密码登录，成功后写入 8 小时 HttpOnly Cookie。Cookie 的 Secure 属性由环境变量 `AUTH_COOKIE_SECURE` 控制（未设置时生产默认 true）；部署形态对该变量的要求见 [`reference/gitlab-release-pipeline.md`](../reference/gitlab-release-pipeline.md)「部署访问形态」。
 - Cookie token 包含 `userId`、`username`、`role`、`tokenVersion`、`exp` 并做 HMAC 签名。
+- 单会话互踢：每次登录成功都会先递增该用户 `tokenVersion`，再用新版本签发 Cookie；同账号此前签发的 token 在下一次受保护 API 校验时因版本落后失效（后登顶前登）。Prisma 与 local-store fallback 路径都必须递增版本。
 - 受保护 API 每次先校验 token 签名和过期时间，再校验服务端用户状态缓存/数据库中的 `isActive` 与 `tokenVersion`。
+- 如果 token 签名有效、未过期且账号仍启用，但 `tokenVersion` 落后于服务端当前版本，受保护 API 返回 401「该账号已在其他设备登录，当前会话已下线」，并设置响应头 `x-auth-reason: superseded`。普通未登录、过期或无效 token 仍返回 401「请先登录」，不设置该 header。
 - 用户禁用、启用、改密码、删除后会清理用户状态缓存；禁用用户下一次受保护 API 请求返回 401。
 - 健康检查、登录、退出和 `GET /api/auth/me` 之外，业务 API 默认要求登录。
 - 系统配置、用户管理和开发态 `DELETE /api/debug/local-store` 要求 `ADMIN`。
@@ -39,9 +41,9 @@ metadata:
 
 | 方法 | 路径 | 功能 | Body / 查询参数 |
 |------|------|------|-----------------|
-| POST | `/api/auth/login` | 登录并写入 HttpOnly Cookie | `{ username, password }` |
+| POST | `/api/auth/login` | 登录并写入 HttpOnly Cookie；成功后递增 `tokenVersion` 顶掉同账号旧会话 | `{ username, password }` |
 | POST | `/api/auth/logout` | 清除登录 Cookie | - |
-| GET | `/api/auth/me` | 当前登录用户 | - |
+| GET | `/api/auth/me` | 当前登录用户；被新登录顶下线时返回 401 + `x-auth-reason: superseded` | - |
 | PATCH | `/api/account` | 当前用户修改用户名/密码 | `{ username?, currentPassword?, password? }` |
 | GET | `/api/users` | 管理员查询用户 | `username`, `isActive` |
 | POST | `/api/users` | 管理员新增维护者，随机密码一次性返回 | `{ username }` |

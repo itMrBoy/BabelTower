@@ -21,9 +21,12 @@ export function useAuth() {
 
 async function readUser() {
   const response = await fetch("/api/auth/me", { cache: "no-store" });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    // 透传服务端 401 原因（如 superseded：会话被其他设备登录顶下线），供守卫拼到登录页 URL。
+    return { user: null, reason: response.headers.get("x-auth-reason") };
+  }
   const body = (await response.json()) as { user?: ApiUser };
-  return body.user ?? null;
+  return { user: body.user ?? null, reason: null };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -33,12 +36,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // loading 只表达「首屏首次校验尚未完成」；导航与手动 refresh 都不会再把它翻回 true。
   const [loading, setLoading] = useState(true);
   const didInitRef = useRef(false);
+  // 最近一次 /api/auth/me 401 的原因（如 superseded），重定向守卫拼进登录页 URL 后即清空。
+  const authReasonRef = useRef<string | null>(null);
 
   // refresh 只负责「拉一次用户写入 state」，不碰 loading、不读 pathname、不就地重定向。
   // 依赖为空 => 引用在会话期间稳定 => 切菜单不会让它重建、不会触发全屏 loading。
   const refresh = useCallback(async () => {
-    const nextUser = await readUser();
-    setUser(nextUser);
+    const next = await readUser();
+    authReasonRef.current = next.reason;
+    setUser(next.user);
   }, []);
 
   const logout = useCallback(async () => {
@@ -55,8 +61,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const nextUser = await readUser();
-        if (!cancelled) setUser(nextUser);
+        const next = await readUser();
+        if (!cancelled) {
+          authReasonRef.current = next.reason;
+          setUser(next.user);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -71,7 +80,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!user && pathname !== "/login") {
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      const params = new URLSearchParams({ next: pathname });
+      if (authReasonRef.current) {
+        params.set("reason", authReasonRef.current);
+        authReasonRef.current = null;
+      }
+      router.replace(`/login?${params.toString()}`);
     }
   }, [loading, user, pathname, router]);
 

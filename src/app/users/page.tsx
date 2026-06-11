@@ -5,6 +5,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useMessage } from "@/components/message-provider";
 import ConfirmPopover from "@/components/confirm-popover";
 import { requestJson } from "@/lib/http-client";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 type UserRow = {
   id: string;
@@ -98,10 +99,9 @@ export default function UsersPage() {
 
   async function copyCreatedPassword() {
     if (!createdPassword) return;
-    try {
-      await navigator.clipboard.writeText(createdPassword);
+    if (await copyTextToClipboard(createdPassword)) {
       message.success("密码已复制。");
-    } catch {
+    } else {
       message.error("复制失败，请手动复制密码。");
     }
   }

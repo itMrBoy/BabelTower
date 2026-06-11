@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { fail, ok } from "@/lib/api";
-import { getCurrentUserFromRequest } from "@/lib/auth";
+import { ok } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const user = await getCurrentUserFromRequest(request);
-  if (!user) return fail("请先登录", 401);
+  const auth = await requireUser(request);
+  if (auth.response) return auth.response;
+  const user = auth.user;
   return ok({ user: { id: user.id, username: user.username, role: user.role } });
 }

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import type { UserRole } from "@prisma/client";
 import { fail } from "@/lib/api";
 import {
+  bumpLocalUserTokenVersion,
   clearLocalUserCache,
   getLocalUserById,
   getLocalUserByUsername,
@@ -166,27 +167,66 @@ async function readUserState(userId: string) {
 }
 
 export async function getCurrentUserFromRequest(request: NextRequest | Request) {
+  const resolved = await resolveRequestUser(request);
+  return resolved.user;
+}
+
+// 区分「未登录/过期」与「token 已被新登录顶替」两种 401，供 requireUser 返回不同文案。
+async function resolveRequestUser(
+  request: NextRequest | Request,
+): Promise<{ user: CurrentUser | null; superseded: boolean }> {
   const token = "cookies" in request
     ? (request as NextRequest).cookies.get(AUTH_COOKIE)?.value
     : cookieFromHeader(request, AUTH_COOKIE);
-  if (!token) return null;
+  if (!token) return { user: null, superseded: false };
   const payload = parseSessionToken(token);
-  if (!payload) return null;
+  if (!payload) return { user: null, superseded: false };
   const state = await readUserState(payload.id);
-  if (!state?.isActive) return null;
-  if (state.tokenVersion !== payload.tokenVersion) return null;
+  if (!state?.isActive) return { user: null, superseded: false };
+  // 签名有效、未过期、账号正常，仅 tokenVersion 落后 => 该会话已被后续登录顶下线。
+  if (state.tokenVersion !== payload.tokenVersion) return { user: null, superseded: true };
   return {
-    id: state.id,
-    username: state.username,
-    role: state.role,
-    tokenVersion: state.tokenVersion,
-  } satisfies CurrentUser;
+    user: {
+      id: state.id,
+      username: state.username,
+      role: state.role,
+      tokenVersion: state.tokenVersion,
+    } satisfies CurrentUser,
+    superseded: false,
+  };
+}
+
+// 登录互踢：递增 tokenVersion 使同账号此前签发的所有 token 失效；返回新版本号用于签发本次 token。
+// 返回 null 表示降级模式下 local-store 无此用户（本次登录不互踢，但不阻断登录）。
+export async function bumpTokenVersion(userId: string): Promise<number | null> {
+  try {
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+      select: { tokenVersion: true },
+    });
+    // 必须清进程内缓存，否则新 token 在 TTL 内会被旧缓存的 tokenVersion 拒绝。
+    clearUserStateCache(userId);
+    return updated.tokenVersion;
+  } catch (error) {
+    if (!isDatabaseUnavailable(error)) throw error;
+    const user = bumpLocalUserTokenVersion(userId);
+    clearUserStateCache(userId);
+    return user?.tokenVersion ?? null;
+  }
 }
 
 export async function requireUser(request: NextRequest | Request) {
-  const user = await getCurrentUserFromRequest(request);
-  if (!user) return { response: fail("请先登录", 401), user: null };
-  return { response: null, user };
+  const resolved = await resolveRequestUser(request);
+  if (!resolved.user) {
+    if (resolved.superseded) {
+      const response = fail("该账号已在其他设备登录，当前会话已下线", 401);
+      response.headers.set("x-auth-reason", "superseded");
+      return { response, user: null };
+    }
+    return { response: fail("请先登录", 401), user: null };
+  }
+  return { response: null, user: resolved.user };
 }
 
 export async function requireAdmin(request: NextRequest | Request) {

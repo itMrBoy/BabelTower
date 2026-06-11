@@ -261,6 +261,15 @@ export function updateLocalAccount(
   return user;
 }
 
+// 登录互踢：每次登录递增 tokenVersion，使同账号先前签发的 token 全部失效。
+export function bumpLocalUserTokenVersion(userId: string) {
+  const user = getLocalUserById(userId);
+  if (!user) return null;
+  user.tokenVersion += 1;
+  user.updatedAt = now();
+  return user;
+}
+
 export function setLocalUserActive(userId: string, isActive: boolean) {
   const user = getLocalUserById(userId);
   if (!user) return null;

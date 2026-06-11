@@ -24,10 +24,14 @@ export async function readBody(response: Response): Promise<Record<string, unkno
   }
 }
 
-function redirectToLogin() {
+function redirectToLogin(reason?: string) {
   if (typeof window === "undefined") return;
   if (window.location.pathname !== "/login") {
-    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    const params = new URLSearchParams({
+      next: window.location.pathname + window.location.search,
+    });
+    if (reason) params.set("reason", reason);
+    window.location.href = `/login?${params.toString()}`;
   }
 }
 
@@ -35,7 +39,8 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init);
   if (response.status === 401 || response.status === 403) {
     window.dispatchEvent(new Event("babeltower:auth-expired"));
-    redirectToLogin();
+    // 服务端通过 x-auth-reason 区分「会话被其他设备登录顶下线」与普通未登录/过期。
+    redirectToLogin(response.headers.get("x-auth-reason") ?? undefined);
   }
   return response;
 }
